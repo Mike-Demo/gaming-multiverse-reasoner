@@ -99,11 +99,19 @@ def connect(user, pw):
 # ---------- one-time bootstrap (master user) ----------
 def bootstrap():
     """Create/refresh the read-only ACL user and seed a trivial graph so the
-    gate query returns a real result. Idempotent; runs once per container."""
+    gate query returns a real result. Idempotent. ACL users do not survive a
+    FalkorDB restart (no aclfile), so if the reader login stops working we
+    re-run the bootstrap instead of trusting the one-time flag."""
     global _boot_done, _boot_error
     with _boot_lock:
         if _boot_done:
-            return
+            try:
+                rc = connect(READER, READER_PW)
+                rc.cmd("PING")
+                rc.close()
+                return
+            except Exception:
+                _boot_done = False
         try:
             c = connect("default", MASTER_PW)
             c.cmd(
