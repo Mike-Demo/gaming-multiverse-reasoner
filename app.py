@@ -152,6 +152,21 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if self.path.startswith("/api/fetch"):
+            # outbound HTTPS test from inside Code Engine
+            from urllib.parse import urlparse, parse_qs
+            import urllib.request as u
+            q = parse_qs(urlparse(self.path).query)
+            url = q.get("url", ["https://example.com/"])[0]
+            try:
+                rq = u.Request(url, headers={"User-Agent": "gate-probe"})
+                with u.urlopen(rq, timeout=10) as resp:
+                    body = resp.read(120).decode("utf-8", "replace")
+                    return self._send(200, json.dumps({"ok": True, "url": url,
+                                                       "status": resp.status, "head": body}))
+            except Exception as e:
+                return self._send(200, json.dumps({"ok": False, "url": url,
+                                                   "error": f"{type(e).__name__}: {e}"}))
         if self.path.startswith("/api/probe"):
             # TCP probe of the VSI's own ports only (diagnostics + gate check 4)
             from urllib.parse import urlparse, parse_qs
@@ -161,7 +176,7 @@ class H(BaseHTTPRequestHandler):
             except ValueError:
                 return self._send(400, json.dumps({"ok": False, "error": "bad port"}))
             host = q.get("host", [HOST])[0]
-            if host not in (HOST, "174.37.172.19"):  # our VSI or Bob's VSI only
+            if host not in (HOST, "174.37.172.19", "1.1.1.1"):
                 return self._send(400, json.dumps({"ok": False, "error": "host not allowed"}))
             stage = "connect"
             try:
