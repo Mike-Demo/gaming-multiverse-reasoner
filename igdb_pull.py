@@ -61,7 +61,8 @@ def query(endpoint, body):
     out = curl([f"{BASE}/{endpoint}", "-H", f"Client-ID: {CID}",
                 "-H", f"Authorization: Bearer {TOK}"], data=body)
     rows = json.loads(out)
-    if isinstance(rows, dict):
+    if isinstance(rows, dict) or (rows and isinstance(rows[0], dict)
+                                  and "title" in rows[0] and "status" in rows[0]):
         raise RuntimeError(f"{endpoint} error: {str(rows)[:200]} :: {body[:120]}")
     return rows
 
@@ -153,7 +154,7 @@ def main():
     for i in range(0, len(game_ids), 500):
         batch = game_ids[i:i + 500]
         rows = paginate("involved_companies",
-                        "id,company,game,published,developed,porting,supporting",
+                        "id,company,game,publisher,developer,porting,supporting",
                         where="game = (" + ",".join(map(str, batch)) + ")",
                         fname="involved_companies.jsonl")
         inv_total += len(rows)
