@@ -365,6 +365,39 @@ def api_resolve(qstr):
     return {"results": out}
 
 
+def api_random():
+    """Four different games for the Surprise-me button.
+
+    Pool = the 600 most-rated games (well connected, so bridges exist);
+    shuffled server-side, preferring four distinct detected communities
+    so the paths between them are interesting rather than same-cluster.
+    """
+    import random
+    rows = ro_query(
+        "MATCH (g:Game) WHERE coalesce(g.rating_count, 0) >= 250 "
+        "RETURN g.igdb_id, g.name, coalesce(g.rating_count, 0), g.community "
+        "ORDER BY coalesce(g.rating_count, 0) DESC LIMIT 600")
+    pool = [list(r) for r in rows]
+    random.shuffle(pool)
+    picks, seen_comms = [], set()
+    for r in pool:
+        if r[3] is not None and r[3] in seen_comms:
+            continue
+        picks.append(r)
+        if r[3] is not None:
+            seen_comms.add(r[3])
+        if len(picks) == 4:
+            break
+    if len(picks) < 4:
+        for r in pool:
+            if r not in picks:
+                picks.append(r)
+            if len(picks) == 4:
+                break
+    return {"games": [{"igdb_id": r[0], "name": r[1], "rating_count": r[2]}
+                      for r in picks]}
+
+
 def api_bridges(ids):
     ids = [int(i) for i in ids][:4]
     if len(ids) < 2:
@@ -520,6 +553,8 @@ class Handler(BaseHTTPRequestHandler):
                 from urllib.parse import urlparse, parse_qs
                 qs = parse_qs(urlparse(self.path).query)
                 self._json(api_resolve((qs.get("q") or [""])[0]))
+            elif self.path.startswith("/api/random"):
+                self._json(api_random())
             elif self.path.startswith("/api/bridges"):
                 from urllib.parse import urlparse, parse_qs
                 qs = parse_qs(urlparse(self.path).query)
@@ -571,6 +606,7 @@ background:#0d1117;color:var(--txt)}
 .results{position:relative}.dropdown{position:absolute;z-index:5;background:#1c2330;
 border:1px solid var(--line);border-radius:8px;width:100%;max-height:230px;overflow:auto}
 .dropdown div{padding:7px 10px;cursor:pointer}.dropdown div:hover{background:#26314a}
+.dropdown div.sel{background:#26314a}
 .dropdown small{color:var(--dim)}
 button{background:var(--acc);color:#06280f;border:0;border-radius:8px;
 padding:11px 18px;font-weight:700;cursor:pointer;font-size:15px}
@@ -607,6 +643,7 @@ cite the graph’s own path IDs — citations are validated in code.</p></header
 <div id="left">
  <div class="panel"><div class="slots" id="slots"></div>
  <button id="go">Find the hidden paths</button>
+ <button class="secondary" id="rand">🎲 Surprise me — 4 random games</button>
  <span class="small" id="status"></span></div>
  <div class="panel"><svg id="graph" viewBox="0 0 900 560"></svg>
  <div class="small">Click any path or claim to highlight it in the graph.</div></div>
@@ -632,20 +669,37 @@ DEMO.forEach(([name,id],i)=>{
   <div class="dropdown" id="dd${i}" style="display:none"></div></div>`;
   slotsEl.appendChild(d);
   const inp=d.querySelector('input'),dd=d.querySelector('.dropdown');
-  let timer;
+  let timer,items=[],hi=-1;
+  const closeDD=()=>{dd.style.display='none';hi=-1};
+  const paint=()=>{[...dd.children].forEach((c,k)=>c.classList.toggle('sel',k===hi))};
+  const pick=g=>{if(!g)return;selected[i]={name:g.name,igdb_id:g.igdb_id};
+    inp.value=g.name;closeDD()};
   inp.addEventListener('input',()=>{clearTimeout(timer);
     timer=setTimeout(async()=>{
-      const q=inp.value.trim();if(q.length<2){dd.style.display='none';return}
+      const q=inp.value.trim();if(q.length<2){closeDD();return}
       const r=await fetch('/api/resolve?q='+encodeURIComponent(q));
-      const j=await r.json();dd.innerHTML='';
-      (j.results||[]).forEach(g=>{
+      const j=await r.json();items=j.results||[];hi=items.length?0:-1;
+      dd.innerHTML='';
+      if(!items.length){const o=document.createElement('div');
+        o.innerHTML='<small>No matches — try another title</small>';
+        dd.appendChild(o)}
+      items.forEach((g,k)=>{
         const o=document.createElement('div');
         o.innerHTML=`${g.name} <small>${g.year||''} · ★${g.rating_count}</small>`;
-        o.onclick=()=>{selected[i]={name:g.name,igdb_id:g.igdb_id};
-          inp.value=g.name;dd.style.display='none'};
+        o.onmouseenter=()=>{hi=k;paint()};
+        o.onclick=()=>pick(g);
         dd.appendChild(o)});
-      dd.style.display=j.results&&j.results.length?'block':'none';
+      paint();
+      dd.style.display='block';
     },220)});
+  inp.addEventListener('keydown',e=>{
+    if(dd.style.display==='none')return;
+    if(e.key==='ArrowDown'){e.preventDefault();hi=Math.min(hi+1,items.length-1);paint()}
+    else if(e.key==='ArrowUp'){e.preventDefault();hi=Math.max(hi-1,0);paint()}
+    else if(e.key==='Enter'){if(items.length){e.preventDefault();pick(items[Math.max(hi,0)])}}
+    else if(e.key==='Escape'){closeDD()}
+  });
+  inp.addEventListener('blur',()=>setTimeout(closeDD,150));
 });
 let DATA=null,activePaths=new Set();
 const KIND_LABEL={shared:'shared thread','common-neighbor':'common neighbour',
@@ -723,6 +777,20 @@ document.getElementById('narrate').onclick=async()=>{
   }catch(e){box.innerHTML='<p class="err">'+e.message+'</p>'}
   btn.disabled=false;
 };
+document.getElementById('rand').onclick=async()=>{
+  const btn=document.getElementById('rand');btn.disabled=true;
+  const st=document.getElementById('status');
+  st.textContent=' picking four random games…';
+  try{
+    const r=await fetch('/api/random');const j=await r.json();
+    if(j.error)throw new Error(j.error);
+    (j.games||[]).forEach((g,i)=>{
+      selected[i]={name:g.name,igdb_id:g.igdb_id};
+      const inp=document.getElementById('in'+i);if(inp)inp.value=g.name});
+    if((j.games||[]).length>=2)document.getElementById('go').click();
+  }catch(e){st.innerHTML=' <span class="err">'+e.message+'</span>'}
+  btn.disabled=false;
+};
 // --- tiny force layout + SVG render ---
 function renderGraph(){
   const svg=document.getElementById('graph');svg.innerHTML='';
@@ -780,6 +848,8 @@ function renderGraph(){
     t.textContent=n.name.length>22?n.name.slice(0,21)+'…':n.name;
     gEl.appendChild(c);gEl.appendChild(t);svg.appendChild(gEl)});
 }
+// Open on the demo graph: run the default four-game query immediately.
+document.getElementById('go').click();
 </script></body></html>
 """
 
