@@ -108,7 +108,7 @@ def bootstrap():
             c = connect("default", MASTER_PW)
             c.cmd(
                 "ACL", "SETUSER", READER, "reset", "on", ">" + READER_PW,
-                "-@all", "+ping", "+graph.ro_query", "+graph.list",
+                "~*", "-@all", "+ping", "+graph.ro_query", "+graph.list",
                 "+info", "+auth", "+select", "+client|setinfo",
             )
             c.cmd(
