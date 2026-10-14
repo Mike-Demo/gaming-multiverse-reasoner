@@ -733,18 +733,26 @@ function renderGraph(){
     p.edges.forEach(e=>edges.push({...e,pid:p.path_id}))}));
   const sel=new Set(DATA.games.map(g=>'Game:'+g.igdb_id));
   const arr=[...nodes.values()];
-  for(let t=0;t<260;t++){
+  // Deterministic ellipse start + capped forces: uncapped repulsion in the
+  // first version flung every node into the corners and pinned them there.
+  arr.forEach((n,i)=>{const a=2*Math.PI*i/Math.max(arr.length,1);
+    n.x=450+210*Math.cos(a);n.y=280+150*Math.sin(a);n.vx=0;n.vy=0});
+  for(let t=0;t<300;t++){
     for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){
       const a=arr[i],b=arr[j];let dx=a.x-b.x,dy=a.y-b.y;
-      let d2=dx*dx+dy*dy+0.01,d=Math.sqrt(d2);
-      let f=2600/d2;dx*=f;dy*=f;a.vx+=dx;a.vy+=dy;b.vx-=dx;b.vy-=dy}
+      let d2=Math.max(dx*dx+dy*dy,25),d=Math.sqrt(d2);
+      let f=Math.min(5000/d2,2.5),ux=dx/d,uy=dy/d;
+      a.vx+=ux*f;a.vy+=uy*f;b.vx-=ux*f;b.vy-=uy*f}
     edges.forEach(e=>{
       const a=nodes.get(e.a),b=nodes.get(e.b);if(!a||!b)return;
       let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+0.01;
-      let f=(d-120)*0.012;dx*=f;dy*=f;a.vx+=dx;a.vy+=dy;b.vx-=dx;b.vy-=dy});
-    arr.forEach(n=>{n.vx+=(450-n.x)*0.004;n.vy+=(280-n.y)*0.004;
-      n.x+=n.vx*0.55;n.y+=n.vy*0.55;n.vx*=0.82;n.vy*=0.82;
-      n.x=Math.max(60,Math.min(840,n.x));n.y=Math.max(40,Math.min(520,n.y))});
+      let f=(d-135)*0.018,ux=dx/d,uy=dy/d;
+      a.vx+=ux*f;a.vy+=uy*f;b.vx-=ux*f;b.vy-=uy*f});
+    arr.forEach(n=>{n.vx+=(450-n.x)*0.006;n.vy+=(280-n.y)*0.006;
+      const sp=Math.hypot(n.vx,n.vy);
+      if(sp>6){n.vx*=6/sp;n.vy*=6/sp}
+      n.x+=n.vx;n.y+=n.vy;n.vx*=0.78;n.vy*=0.78;
+      n.x=Math.max(70,Math.min(830,n.x));n.y=Math.max(45,Math.min(515,n.y))});
   }
   const NS='http://www.w3.org/2000/svg';
   edges.forEach(e=>{
