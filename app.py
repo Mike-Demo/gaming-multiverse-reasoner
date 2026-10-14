@@ -160,9 +160,12 @@ class H(BaseHTTPRequestHandler):
                 port = int(q.get("port", ["6379"])[0])
             except ValueError:
                 return self._send(400, json.dumps({"ok": False, "error": "bad port"}))
+            host = q.get("host", [HOST])[0]
+            if host not in (HOST, "174.37.172.19"):  # our VSI or Bob's VSI only
+                return self._send(400, json.dumps({"ok": False, "error": "host not allowed"}))
             stage = "connect"
             try:
-                s = socket.create_connection((HOST, port), timeout=8)
+                s = socket.create_connection((host, port), timeout=8)
                 s.settimeout(6)
                 stage = "read/write"
                 if port == 6379:
