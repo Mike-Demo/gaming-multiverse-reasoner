@@ -365,12 +365,36 @@ def api_resolve(qstr):
     return {"results": out}
 
 
+def _picks_connected(picks):
+    """True when pair_paths finds >= 1 path for every pair in the set.
+
+    A Surprise-me set should never contain a dead pair (the first live
+    draw paired The Last of Us Part II with Hearthstone: no shared
+    attribute under the hub caps, no chain, no company bridge).
+    """
+    jobs = [(picks[i], picks[j]) for i in range(len(picks))
+            for j in range(i + 1, len(picks))]
+
+    def one(ab):
+        try:
+            return bool(pair_paths(ab[0][0], ab[0][1], ab[1][0], ab[1][1]))
+        except Exception as e:
+            print("random validation:", type(e).__name__, e, flush=True)
+            return False
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        return all(ex.map(one, jobs))
+
+
 def api_random():
     """Four different games for the Surprise-me button.
 
     Pool = the 600 most-rated games (well connected, so bridges exist);
     shuffled server-side, preferring four distinct detected communities
     so the paths between them are interesting rather than same-cluster.
+    Candidate sets are validated with the real path queries so every
+    pair in the returned set actually connects; up to 5 draws, then the
+    last set is returned as-is.
     """
     import random
     rows = ro_query(
@@ -378,22 +402,26 @@ def api_random():
         "RETURN g.igdb_id, g.name, coalesce(g.rating_count, 0), g.community "
         "ORDER BY coalesce(g.rating_count, 0) DESC LIMIT 600")
     pool = [list(r) for r in rows]
-    random.shuffle(pool)
-    picks, seen_comms = [], set()
-    for r in pool:
-        if r[3] is not None and r[3] in seen_comms:
-            continue
-        picks.append(r)
-        if r[3] is not None:
-            seen_comms.add(r[3])
-        if len(picks) == 4:
-            break
-    if len(picks) < 4:
+    picks = []
+    for _attempt in range(5):
+        random.shuffle(pool)
+        picks, seen_comms = [], set()
         for r in pool:
-            if r not in picks:
-                picks.append(r)
+            if r[3] is not None and r[3] in seen_comms:
+                continue
+            picks.append(r)
+            if r[3] is not None:
+                seen_comms.add(r[3])
             if len(picks) == 4:
                 break
+        if len(picks) < 4:
+            for r in pool:
+                if r not in picks:
+                    picks.append(r)
+                if len(picks) == 4:
+                    break
+        if len(picks) == 4 and _picks_connected(picks):
+            break
     return {"games": [{"igdb_id": r[0], "name": r[1], "rating_count": r[2]}
                       for r in picks]}
 
@@ -614,8 +642,29 @@ button.secondary{background:#26314a;color:var(--txt)}
 button:disabled{opacity:.5}
 #go{margin-top:12px}
 svg{width:100%;height:560px;background:#0a0e14;border-radius:10px}
-.edge{stroke:#3d4a5f;stroke-width:1.4}.edge.hot{stroke:var(--acc);stroke-width:3}
+.edge{stroke:#3d4a5f;stroke-width:1.4;stroke-dasharray:3 6;
+animation:flow 1.4s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-9}}
+.edge.hot{stroke:var(--acc);stroke-width:3;stroke-dasharray:9 5;
+animation-duration:.45s;filter:drop-shadow(0 0 4px var(--acc))}
 .edge.dim{opacity:.12}.node.dim{opacity:.15}
+.node{cursor:pointer;transform-box:fill-box;transform-origin:center;
+animation:pop .45s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes pop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.12)}
+100%{transform:scale(1);opacity:1}}
+.node .hit{fill:#fff;fill-opacity:0}
+.node .pulse{fill:none;stroke:var(--acc);stroke-width:2;pointer-events:none;
+transform-box:fill-box;transform-origin:center;animation:ring 1.8s ease-out infinite}
+@keyframes ring{0%{transform:scale(1);opacity:.75}100%{transform:scale(2.1);opacity:0}}
+.slot input{transition:border-color .25s,box-shadow .25s}
+.slot input.spinning{border-color:var(--warn);color:var(--warn)}
+.slot input.landed{border-color:var(--acc);box-shadow:0 0 0 3px rgba(126,231,135,.35)}
+@media (max-width:720px){
+main{padding:10px 10px 22px;gap:10px}
+header{padding:16px 14px 2px}h1{font-size:22px}
+#left{min-width:0;flex:1 1 100%}#right{min-width:0;flex:1 1 100%;
+max-height:none;overflow:visible}
+svg{height:430px}button{padding:13px 16px}.panel{padding:13px}}
 .nlabel{fill:var(--txt);font-size:11px;text-anchor:middle;pointer-events:none}
 .pairtitle{font-weight:700;margin:10px 0 6px}
 .path{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:7px 0;
@@ -646,7 +695,7 @@ cite the graph’s own path IDs — citations are validated in code.</p></header
  <button class="secondary" id="rand">🎲 Surprise me — 4 random games</button>
  <span class="small" id="status"></span></div>
  <div class="panel"><svg id="graph" viewBox="0 0 900 560"></svg>
- <div class="small">Click any path or claim to highlight it in the graph.</div></div>
+ <div class="small">Tap or click any node, path or claim to highlight its connections.</div></div>
 </div>
 <div id="right">
  <div class="panel"><b>Why are they connected?</b>
@@ -777,18 +826,40 @@ document.getElementById('narrate').onclick=async()=>{
   }catch(e){box.innerHTML='<p class="err">'+e.message+'</p>'}
   btn.disabled=false;
 };
+const FILLER=['Minecraft','Tetris','Portal 2','Celeste','Undertale','Doom',
+'Pac-Man','Chrono Trigger','Half-Life 2','Dark Souls','Persona 5','Journey',
+'Cuphead','Hollow Knight','Stardew Valley','The Witcher 3: Wild Hunt',
+'Super Mario Odyssey','Final Fantasy VII','Inside','Tetris Effect'];
 document.getElementById('rand').onclick=async()=>{
   const btn=document.getElementById('rand');btn.disabled=true;
+  const goBtn=document.getElementById('go');goBtn.disabled=true;
   const st=document.getElementById('status');
-  st.textContent=' picking four random games…';
+  st.textContent=' 🎰 rolling the multiverse…';
+  const inputs=[0,1,2,3].map(i=>document.getElementById('in'+i));
+  inputs.forEach(inp=>{inp.classList.add('spinning');
+    inp.classList.remove('landed')});
+  const spin=setInterval(()=>{inputs.forEach(inp=>{
+    if(inp.classList.contains('spinning'))
+      inp.value=FILLER[Math.floor(Math.random()*FILLER.length)]})},70);
+  const stopSpin=()=>{clearInterval(spin);
+    inputs.forEach(inp=>inp.classList.remove('spinning'))};
   try{
     const r=await fetch('/api/random');const j=await r.json();
     if(j.error)throw new Error(j.error);
-    (j.games||[]).forEach((g,i)=>{
-      selected[i]={name:g.name,igdb_id:g.igdb_id};
-      const inp=document.getElementById('in'+i);if(inp)inp.value=g.name});
-    if((j.games||[]).length>=2)document.getElementById('go').click();
-  }catch(e){st.innerHTML=' <span class="err">'+e.message+'</span>'}
+    const games=j.games||[];
+    await Promise.all(games.map((g,i)=>new Promise(res=>{
+      setTimeout(()=>{selected[i]={name:g.name,igdb_id:g.igdb_id};
+        const inp=inputs[i];inp.value=g.name;
+        inp.classList.remove('spinning');inp.classList.add('landed');
+        setTimeout(()=>inp.classList.remove('landed'),800);res()},
+        450+i*380)})));
+    stopSpin();
+    goBtn.disabled=false;
+    if(games.length>=2)document.getElementById('go').click();
+  }catch(e){stopSpin();
+    inputs.forEach((inp,i)=>{if(selected[i])inp.value=selected[i].name});
+    st.innerHTML=' <span class="err">'+e.message+'</span>';
+    goBtn.disabled=false}
   btn.disabled=false;
 };
 // --- tiny force layout + SVG render ---
@@ -800,6 +871,11 @@ function renderGraph(){
       {...n,x:450+(Math.random()-.5)*500,y:280+(Math.random()-.5)*340,vx:0,vy:0})});
     p.edges.forEach(e=>edges.push({...e,pid:p.path_id}))}));
   const sel=new Set(DATA.games.map(g=>'Game:'+g.igdb_id));
+  const nodePids={};
+  edges.forEach(e=>{if(e.pid){
+    (nodePids[e.a]=nodePids[e.a]||new Set()).add(e.pid);
+    (nodePids[e.b]=nodePids[e.b]||new Set()).add(e.pid)}});
+  Object.keys(nodePids).forEach(k=>nodePids[k]=[...nodePids[k]]);
   const arr=[...nodes.values()];
   // Deterministic ellipse start + capped forces: uncapped repulsion in the
   // first version flung every node into the corners and pinned them there.
@@ -833,11 +909,16 @@ function renderGraph(){
   const COL={Game:'#7ee787',Company:'#f0b429',Genre:'#79c0ff',Theme:'#d2a8ff',
   Platform:'#8b949e',GameMode:'#ffa657',PlayerPerspective:'#a5d6ff',
   Franchise:'#ff7b72',Collection:'#56d4dd'};
-  arr.forEach(n=>{
+  arr.forEach((n,idx)=>{
     const gEl=document.createElementNS(NS,'g');
     gEl.setAttribute('class','node');gEl.dataset.key=n.key;
-    const c=document.createElementNS(NS,'circle');
+    gEl.style.animationDelay=(idx*35)+'ms';
     const r=sel.has(n.key)?17:(n.label==='Game'?13:9);
+    if(sel.has(n.key)){
+      const p=document.createElementNS(NS,'circle');
+      p.setAttribute('cx',n.x);p.setAttribute('cy',n.y);p.setAttribute('r',r);
+      p.setAttribute('class','pulse');gEl.appendChild(p)}
+    const c=document.createElementNS(NS,'circle');
     c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r',r);
     c.setAttribute('fill',COL[n.label]||'#ccc');
     c.setAttribute('stroke',sel.has(n.key)?'#fff':'none');
@@ -846,7 +927,13 @@ function renderGraph(){
     t.setAttribute('x',n.x);t.setAttribute('y',n.y+r+13);
     t.setAttribute('class','nlabel');
     t.textContent=n.name.length>22?n.name.slice(0,21)+'…':n.name;
-    gEl.appendChild(c);gEl.appendChild(t);svg.appendChild(gEl)});
+    const hit=document.createElementNS(NS,'circle');
+    hit.setAttribute('cx',n.x);hit.setAttribute('cy',n.y);
+    hit.setAttribute('r',Math.max(r+7,20));hit.setAttribute('class','hit');
+    gEl.appendChild(c);gEl.appendChild(t);gEl.appendChild(hit);
+    gEl.onclick=()=>{const pids=nodePids[n.key]||[];
+      if(pids.length)setActive(pids,null)};
+    svg.appendChild(gEl)});
 }
 // Open on the demo graph: run the default four-game query immediately.
 document.getElementById('go').click();
