@@ -108,7 +108,7 @@ def bootstrap():
             c = connect("default", MASTER_PW)
             c.cmd(
                 "ACL", "SETUSER", READER, "reset", "on", ">" + READER_PW,
-                "-@all", "+ping", "+graph.ro_query", "+graph.query_ro", "+graph.list",
+                "-@all", "+ping", "+graph.ro_query", "+graph.list",
                 "+info", "+auth", "+select", "+client|setinfo",
             )
             c.cmd(
@@ -185,6 +185,10 @@ class H(BaseHTTPRequestHandler):
                 stage = "read/write"
                 if port == 6379:
                     s.sendall(b"PING\r\n")
+                    data = s.recv(256)
+                elif port == 3389:
+                    # RDP X.224 connection request — a live RDP server answers
+                    s.sendall(bytes.fromhex("030000130ee000000000000100080003000000"))
                     data = s.recv(256)
                 elif port == 3000:
                     s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n")
