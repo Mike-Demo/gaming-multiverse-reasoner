@@ -38,8 +38,14 @@ DEGREE_CAP = int(os.environ.get("DEGREE_CAP", "800"))
 # than GENRE_HUB_CAP games are treated as hubs ("Adventure", "Action").
 EXCLUDED_SHARED_LABELS = {"Platform", "GameMode"}
 LABEL_DISPLAY = {"PlayerPerspective": "perspective",
-                 "GameMode": "game mode"}
-GENRE_HUB_CAP = int(os.environ.get("GENRE_HUB_CAP", "6000"))
+                 "GameMode": "game mode", "Engine": "engine"}
+GENRE_HUB_CAP = int(os.environ.get("GENRE_HUB_CAP", "12000"))
+# Lineage edges (Game -> Game): the child/version points at its parent.
+LINEAGE_TYPES = ("PART_OF", "VERSION_OF", "DLC_OF", "EXPANSION_OF",
+                 "REMAKE_OF", "REMASTER_OF")
+LIN_PHRASE = {"PART_OF": "is a version of", "VERSION_OF": "is an edition of",
+              "DLC_OF": "is DLC for", "EXPANSION_OF": "is an expansion of",
+              "REMAKE_OF": "is a remake of", "REMASTER_OF": "is a remaster of"}
 
 _boot_lock = threading.Lock()
 _boot_done = False
@@ -159,26 +165,46 @@ EDGE_FOR_LABEL = {"Genre": "HAS_GENRE", "Theme": "HAS_THEME",
                   "Platform": "ON_PLATFORM", "GameMode": "HAS_MODE",
                   "PlayerPerspective": "HAS_PERSPECTIVE",
                   "Franchise": "IN_FRANCHISE", "Collection": "IN_COLLECTION",
+                  "Engine": "HAS_ENGINE",
                   "Company": "LINKED_COMPANY"}
 ATTR_UNION = ("HAS_GENRE|HAS_THEME|HAS_MODE|HAS_PERSPECTIVE|ON_PLATFORM|"
               "IN_FRANCHISE|IN_COLLECTION")
 COMP_UNION = "DEVELOPED_BY|PUBLISHED_BY|PORTED_BY|SUPPORTED_BY"
-CY_SHARED = ("MATCH (a:Game {igdb_id:$a})-[r1]-(x)-[r2]-(b:Game {igdb_id:$b}) "
-             "RETURN labels(x)[0], x.igdb_id, x.name, x.degree, "
-             "coalesce(x.rating_count, 0), type(r1), type(r2)")
+CY_NEIGHBOURS = (
+    "MATCH (g:Game {igdb_id:$g})-[r]-(x) "
+    "RETURN labels(x)[0], x.igdb_id, x.name, x.degree, "
+    "coalesce(x.rating_count, 0), type(r) LIMIT 9999")
+CY_SHARED_DISPLAY = (
+    CY_NEIGHBOURS + "  -- run for both games; shared neighbours "
+    "intersected in code (a single (a)-[r1]-(x)-[r2]-(b) pattern "
+    "measured ~500 ms/pair on FalkorDB; anchored expansions are ~5 ms)")
 CY_SIMILAR = ("MATCH (a:Game {igdb_id:$a}), (b:Game {igdb_id:$b}) "
               "WITH shortestPath((a)-[:SIMILAR_TO*..4]-(b)) AS p "
               "UNWIND nodes(p) AS n RETURN n.igdb_id, n.name")
-CY_COMPANY = (
-    f"MATCH (a:Game {{igdb_id:$a}})-[r1:{COMP_UNION}]->(x:Company)"
-    f"<-[r2:{COMP_UNION}]-(m:Game)-[r3:{COMP_UNION}]->(y:Company)"
-    f"<-[r4:{COMP_UNION}]-(b:Game {{igdb_id:$b}}) "
-    "WHERE x.degree <= $cap AND y.degree <= $cap "
-    "AND m.igdb_id <> $a AND m.igdb_id <> $b "
-    "RETURN m.igdb_id, m.name, coalesce(m.rating_count, 0), "
-    "x.igdb_id, x.name, x.degree, type(r1), type(r2), "
-    "y.igdb_id, y.name, y.degree, type(r3), type(r4) "
-    "ORDER BY x.degree + y.degree ASC, coalesce(m.rating_count, 0) DESC LIMIT 3")
+LIN_UNION = "|".join(LINEAGE_TYPES)
+CY_LINEAGE_DIRECT = (
+    f"MATCH (a:Game {{igdb_id:$a}})-[r:{LIN_UNION}]-(b:Game {{igdb_id:$b}}) "
+    "RETURN type(r), startNode(r).igdb_id")
+CY_LINEAGE_COMMON = (
+    f"MATCH (a:Game {{igdb_id:$a}})-[r1:{LIN_UNION}]-(p:Game)"
+    f"-[r2:{LIN_UNION}]-(b:Game {{igdb_id:$b}}) "
+    "WHERE p.igdb_id <> $a AND p.igdb_id <> $b "
+    "RETURN p.igdb_id, p.name, type(r1), startNode(r1).igdb_id, "
+    "type(r2), startNode(r2).igdb_id LIMIT 3")
+COMP_TYPES = set(COMP_UNION.split("|"))
+# NOTE: typed-union patterns ([r:TYPE1|TYPE2|...]) measure pathologically
+# slow on this FalkorDB build (~140 ms for an 8-row anchored expansion),
+# so hot paths use untyped expansions and filter type(r) in Python.
+CY_GAME_COMPANIES = (
+    "MATCH (g:Game {igdb_id:$g})-[r]->(c:Company) "
+    "WHERE c.degree <= $cap "
+    "RETURN c.igdb_id, c.name, c.degree, type(r)")
+CY_COMPANY_GAMES = (
+    "MATCH (c:Company {igdb_id:$c})<-[r]-(m:Game) "
+    "WHERE m.igdb_id <> $a AND m.igdb_id <> $b "
+    "RETURN m.igdb_id, m.name, coalesce(m.rating_count, 0), type(r) "
+    "LIMIT 999")
+CY_BRIDGE_GAMES = CY_COMPANY_GAMES  # display: bridge = intersect in code
 
 
 def fill(cypher, **kw):
@@ -201,22 +227,81 @@ def pair_paths(a_id, a_name, b_id, b_name):
     def edge(n1, n2, etype):
         return {"a": n1["key"], "b": n2["key"], "type": etype}
 
+    # --- lineage: direct version-family links + shared lineage nodes ---
+    def lin_clause(subj, rtype, obj):
+        return f"{subj} {LIN_PHRASE.get(rtype, 'is related to')} {obj}"
+
+    try:
+        direct = ro_query(fill(CY_LINEAGE_DIRECT, a=a_id, b=b_id))
+        if direct:
+            # One direct path per pair: keep the most specific relation
+            # (a pair can be PART_OF and REMAKE_OF at once in IGDB data).
+            spec_rank = {"REMAKE_OF": 0, "REMASTER_OF": 0, "DLC_OF": 1,
+                         "EXPANSION_OF": 1, "VERSION_OF": 2, "PART_OF": 3}
+            rtype, start_id = min(
+                direct, key=lambda r: spec_rank.get(r[0], 9))
+            subj, obj = ((a_name, b_name) if start_id == a_id
+                         else (b_name, a_name))
+            paths.append({
+                "kind": "lineage", "nodes": [A, B],
+                "edges": [edge(A, B, rtype)],
+                "via": obj, "via_type": "Game", "degree": 0,
+                "description": lin_clause(subj, rtype, obj) + ".",
+                "cypher": CY_LINEAGE_DIRECT})
+        seen_p = set()
+        for pid_, pname, t1, s1, t2, s2 in ro_query(
+                fill(CY_LINEAGE_COMMON, a=a_id, b=b_id)):
+            if pid_ in seen_p:
+                continue
+            seen_p.add(pid_)
+            P = node("Game", pid_, pname)
+            c1 = (lin_clause(a_name, t1, pname) if s1 == a_id
+                  else lin_clause(pname, t1, a_name))
+            c2 = (lin_clause(b_name, t2, pname) if s2 == b_id
+                  else lin_clause(pname, t2, b_name))
+            paths.append({
+                "kind": "lineage", "nodes": [A, P, B],
+                "edges": [edge(A, P, t1), edge(P, B, t2)],
+                "via": pname, "via_type": "Game", "degree": 1,
+                "description": c1 + "; " + c2 + ".",
+                "cypher": CY_LINEAGE_COMMON})
+    except Exception as e:
+        print("lineage query failed:", type(e).__name__, e, flush=True)
+
     # --- shared neighbours: attributes and common similar games ---
-    shared_rows = ro_query(fill(CY_SHARED + " LIMIT 25", a=a_id, b=b_id))
+    # Two anchored single-hop expansions, intersected in code (see
+    # CY_SHARED_DISPLAY for why the single pattern is too slow here).
+    def neighbours(gid):
+        out = {}
+        for label, xid, name, degree, rc, t in ro_query(
+                fill(CY_NEIGHBOURS, g=gid)):
+            key = f"{label}:{xid}"
+            if key not in out:
+                out[key] = (label, xid, name, degree, rc, t)
+        return out
+
+    na, nb = neighbours(a_id), neighbours(b_id)
+    shared_rows = []
+    for key in na.keys() & nb.keys():
+        label, xid, name, degree, rc, t1 = na[key]
+        shared_rows.append(((label, xid, name, degree, rc, t1, nb[key][5]),
+                            CY_SHARED_DISPLAY))
     attrs, games_x = [], []
-    for label, xid, name, degree, rc, t1, t2 in shared_rows:
+    for (label, xid, name, degree, rc, t1, t2), qtext in shared_rows:
         if label == "Game":
-            games_x.append((xid, name, rc))
+            if t1 in LINEAGE_TYPES and t2 in LINEAGE_TYPES:
+                continue  # the lineage paths above tell this story properly
+            games_x.append((xid, name, rc, t1, t2, qtext))
         elif label in EXCLUDED_SHARED_LABELS:
             continue  # hub suppression: platforms / modes never route paths
-        elif label == "Genre" and (degree or 0) > GENRE_HUB_CAP:
-            continue  # broad-genre hub ("Adventure", "Action", ...)
+        elif label in ("Genre", "Theme", "Engine") and (degree or 0) > GENRE_HUB_CAP:
+            continue  # broad hub genre/theme/engine ("Adventure", "Fantasy")
         else:
-            attrs.append((label, xid, name, degree or 0, t1, t2))
+            attrs.append((label, xid, name, degree or 0, t1, t2, qtext))
     attrs.sort(key=lambda r: r[3])
     seen_types = set()
     best_attr = None
-    for label, xid, name, degree, t1, t2 in attrs:
+    for label, xid, name, degree, t1, t2, qtext in attrs:
         X = node(label, xid, name)
         if best_attr is None or degree < best_attr[3]:
             best_attr = (label, xid, name, degree)
@@ -230,17 +315,21 @@ def pair_paths(a_id, a_name, b_id, b_name):
             "description": f"{a_name} and {b_name} share "
                            f"{LABEL_DISPLAY.get(label, label.lower())} "
                            f"“{name}” (connects {degree} games in the slice).",
-            "cypher": CY_SHARED})
+            "cypher": qtext})
     games_x.sort(key=lambda r: -r[2])
-    for xid, name, rc in games_x[:2]:
+    for xid, name, rc, t1, t2, qtext in games_x[:2]:
         X = node("Game", xid, name)
+        if t1 == "SIMILAR_TO" and t2 == "SIMILAR_TO":
+            desc = (f"IGDB lists {name} as similar to both "
+                    f"{a_name} and {b_name}.")
+        else:
+            desc = f"{name} links to both {a_name} and {b_name} in the graph."
         paths.append({
             "kind": "common-neighbor", "nodes": [A, X, B],
-            "edges": [edge(A, X, "SIMILAR_TO"), edge(X, B, "SIMILAR_TO")],
+            "edges": [edge(A, X, t1), edge(X, B, t2)],
             "via": name, "via_type": "Game", "degree": None,
-            "description": f"IGDB lists {name} as similar to both "
-                           f"{a_name} and {b_name}.",
-            "cypher": CY_SHARED})
+            "description": desc,
+            "cypher": qtext})
 
     # --- community mates via the most specific shared attribute ---
     if best_attr:
@@ -280,14 +369,54 @@ def pair_paths(a_id, a_name, b_id, b_name):
                     "cypher": CY_SIMILAR})
 
     # --- company bridges (degree-capped) ---
-    comp_rows = ro_query(fill(CY_COMPANY, a=a_id, b=b_id, cap=DEGREE_CAP))
+    # Orchestrated: each game's capped companies first (anchored, ~ms),
+    # then one anchored bridge query per company pair. The single 4-hop
+    # chain pattern measured ~540 ms/pair on FalkorDB.
+    def capped_companies(gid):
+        out = {}
+        for cid, cname, cdeg, t in ro_query(
+                fill(CY_GAME_COMPANIES, g=gid, cap=DEGREE_CAP)):
+            if t in COMP_TYPES and cid not in out:
+                out[cid] = (cid, cname, cdeg, t)
+        return out
+
+    def company_games(cid):
+        out = {}
+        for mid, mname, mrc, t in ro_query(
+                fill(CY_COMPANY_GAMES, c=cid, a=a_id, b=b_id)):
+            if t in COMP_TYPES and mid not in out:
+                out[mid] = (mname, mrc, t)
+        return out
+
+    ca_map, cb_map = capped_companies(a_id), capped_companies(b_id)
+    games_by_company = {}
+    comp_rows = []
+    for xid, (_, xn, xd, t1) in ca_map.items():
+        if xid not in games_by_company:
+            games_by_company[xid] = company_games(xid)
+        gx = games_by_company[xid]
+        for yid, (_, yn, yd, t4) in cb_map.items():
+            if yid not in games_by_company:
+                games_by_company[yid] = company_games(yid)
+            gy = games_by_company[yid]
+            for mid in gx.keys() & gy.keys():
+                mname, mrc, t2 = gx[mid]
+                t3 = gy[mid][2]
+                comp_rows.append((mid, mname, mrc, xid, xn, xd, t1, t2,
+                                  yid, yn, yd, t3, t4))
+    comp_rows.sort(key=lambda r: ((r[5] or 0) + (r[10] or 0),
+                                  -(r[2] or 0)))
     seen_bridges = set()
+    emitted = 0
     for (mid, mname, mrc, xid, xn, xd, t1, t2,
          yid, yn, yd, t3, t4) in comp_rows:
+        if emitted >= 3:
+            break  # global top-3, as the single-query version did
         bkey = (mid, xid, yid)
         if bkey in seen_bridges:
             continue  # same bridge via a different role combination
         seen_bridges.add(bkey)
+        emitted += 1
         M = node("Game", mid, mname)
         X = node("Company", xid, xn)
         nodes = [A, X, M]
@@ -307,10 +436,10 @@ def pair_paths(a_id, a_name, b_id, b_name):
         paths.append({
             "kind": "company-bridge", "nodes": nodes, "edges": edges,
             "via": mname, "via_type": "Game", "degree": (xd or 0) + (yd or 0),
-            "description": desc, "cypher": CY_COMPANY})
+            "description": desc, "cypher": CY_BRIDGE_GAMES})
 
-    kind_rank = {"company-bridge": 0, "similar-chain": 1,
-                 "common-neighbor": 1, "shared": 2}
+    kind_rank = {"lineage": 0, "company-bridge": 1, "similar-chain": 2,
+                 "common-neighbor": 2, "shared": 3}
     paths.sort(key=lambda p: (kind_rank.get(p["kind"], 9),
                               p["degree"] if p["degree"] is not None else 10**9))
     return paths
@@ -319,21 +448,43 @@ def pair_paths(a_id, a_name, b_id, b_name):
 def game_info(gid):
     rows = ro_query(fill(
         "MATCH (g:Game {igdb_id:$i}) RETURN g.name, "
-        "coalesce(g.rating_count, 0), g.community, g.community_size", i=gid))
+        "coalesce(g.rating_count, 0), g.community, g.community_size, "
+        "g.summary, coalesce(g.total_rating, 0), g.first_release_date",
+        i=gid))
     if not rows:
         return None
-    name, rc, community, csize = rows[0]
+    name, rc, community, csize, summary, trate, frd = rows[0]
+    year = time.gmtime(frd).tm_year if frd else None
     mates = []
     if community is not None:
-        mrows = ro_query(fill(
-            "MATCH (m:Game {community: $c}) WHERE m.igdb_id <> $i "
-            "RETURN m.name, coalesce(m.rating_count, 0) "
-            "ORDER BY coalesce(m.rating_count, 0) DESC LIMIT 6",
-            c=community, i=gid))
-        mates = [r[0] for r in mrows]
+        # Peers = same-community games directly linked to this one by a
+        # similar-game edge (its local cluster), not just the community's
+        # most-rated members — large LPA communities mix famous titles.
+        raw = ro_query(fill(
+            "MATCH (g:Game {igdb_id: $i})-[r:SIMILAR_TO]-(m:Game) "
+            "WHERE m.community = $c "
+            "RETURN m.igdb_id, m.name, coalesce(m.rating_count, 0), "
+            "startNode(r).igdb_id", c=community, i=gid))
+        by_m = {}
+        for mid, mname, mrc, start in raw:
+            e = by_m.setdefault(mid, {"name": mname, "rc": mrc,
+                                      "dirs": set()})
+            e["dirs"].add(1 if start == gid else 0)
+        ranked = sorted(by_m.values(),
+                        key=lambda e: (0 if len(e["dirs"]) > 1 else 1,
+                                       -e["rc"]))
+        mates = [e["name"] for e in ranked[:6]]
+        if len(mates) < 3:
+            mrows = ro_query(fill(
+                "MATCH (m:Game {community: $c}) WHERE m.igdb_id <> $i "
+                "RETURN m.name, coalesce(m.rating_count, 0) "
+                "ORDER BY coalesce(m.rating_count, 0) DESC LIMIT 6",
+                c=community, i=gid))
+            mates = [r[0] for r in mrows]
     return {"igdb_id": gid, "name": name, "rating_count": rc,
             "community": community, "community_size": csize,
-            "community_top": mates}
+            "community_top": mates, "summary": summary or "",
+            "total_rating": trate, "year": year}
 
 
 def api_resolve(qstr):
@@ -682,10 +833,12 @@ background:#10151d;cursor:pointer}.claim:hover{border-color:var(--acc)}
 <header><h1>🕹️ Gaming Multiverse Reasoner</h1>
 <p class="sub">Pick any set of games and see the <b>hidden paths</b>, <b>bridge
 games</b> and <b>communities</b> that connect them. Every path is computed live
-in <b>FalkorDB</b> from a frozen IGDB snapshot (20,371 games, 14 Oct 2026) with
-hub suppression: platforms and game modes never appear in paths, broad genres
-(connecting 6,000+ games, like “Adventure”) are suppressed, and company
-bridges only route through companies connecting 800 games or fewer — so “PC”
+in <b>FalkorDB</b> from a frozen IGDB snapshot (50,217 games, 14 Oct 2026).
+Paths include direct lineage (remakes, remasters, DLC, expansions), shared
+game engines, company bridges and similar-game chains — with hub
+suppression: platforms and game modes never appear in paths, broad genres,
+themes and engines (connecting 12,000+ games, like “Adventure”) are suppressed, and
+company bridges only route through companies connecting 800 games or fewer — so “PC”
 and “Single player” can never win. Narration by <b>watsonx.ai</b> may only
 cite the graph’s own path IDs — citations are validated in code.</p></header>
 <main>
@@ -751,8 +904,9 @@ DEMO.forEach(([name,id],i)=>{
   inp.addEventListener('blur',()=>setTimeout(closeDD,150));
 });
 let DATA=null,activePaths=new Set();
-const KIND_LABEL={shared:'shared thread','common-neighbor':'common neighbour',
-'similar-chain':'similar-game chain','company-bridge':'company bridge'};
+const KIND_LABEL={lineage:'direct lineage',shared:'shared thread',
+'common-neighbor':'common neighbour','similar-chain':'similar-game chain',
+'company-bridge':'company bridge'};
 document.getElementById('go').onclick=async()=>{
   const ids=selected.filter(Boolean).map(s=>s.igdb_id);
   const st=document.getElementById('status');st.textContent=' querying FalkorDB…';
@@ -787,9 +941,13 @@ function renderComms(){
   const el=document.getElementById('comms');el.innerHTML='';
   DATA.games.forEach(g=>{
     const d=document.createElement('div');d.className='comm';
-    d.innerHTML=g.community==null?`<b>${g.name}</b> — no detected community`
+    const meta=[g.year,g.total_rating?('★ '+Math.round(g.total_rating)):''].filter(Boolean).join(' · ');
+    const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    const sum=g.summary?`<div class="small">${esc(g.summary.slice(0,180))}${g.summary.length>180?'…':''}</div>`:'';
+    d.innerHTML=(g.community==null?`<b>${g.name}</b> — no detected community`
       :`<b>${g.name}</b> — community of ${g.community_size} games
-        (label propagation over similar-game links). Peers: ${g.community_top.join(', ')}`;
+        (label propagation over similar-game links). Peers: ${g.community_top.join(', ')}`)
+      +(meta?` <span class="small">${meta}</span>`:'')+sum;
     el.appendChild(d)});
 }
 function setActive(pids,el){
@@ -908,7 +1066,7 @@ function renderGraph(){
     l.dataset.a=e.a;l.dataset.b=e.b;svg.appendChild(l)});
   const COL={Game:'#7ee787',Company:'#f0b429',Genre:'#79c0ff',Theme:'#d2a8ff',
   Platform:'#8b949e',GameMode:'#ffa657',PlayerPerspective:'#a5d6ff',
-  Franchise:'#ff7b72',Collection:'#56d4dd'};
+  Franchise:'#ff7b72',Collection:'#56d4dd',Engine:'#db61a2'};
   arr.forEach((n,idx)=>{
     const gEl=document.createElementNS(NS,'g');
     gEl.setAttribute('class','node');gEl.dataset.key=n.key;

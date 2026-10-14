@@ -28,7 +28,8 @@ def read_ids(fname, key="id"):
     return ids
 
 qc_ids = set(json.load(open(os.path.join(RAW, "queercade_ids.json"))))
-slice_ids = read_ids("games_top.jsonl") | read_ids("games_extra.jsonl")
+slice_ids = (read_ids("games_top.jsonl") | read_ids("games_extra.jsonl")
+             | read_ids("games_topup.jsonl"))
 missing = sorted(qc_ids - slice_ids)
 log(f"queercade total {len(qc_ids)} | already in slice {len(qc_ids & slice_ids)}"
     f" | missing {len(missing)}")

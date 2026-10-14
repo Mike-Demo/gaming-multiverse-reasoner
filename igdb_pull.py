@@ -2,7 +2,7 @@
 """IGDB frozen-slice pull (Day 1 Block 4 / Day 2 snapshot source).
 
 Reads credentials from ~/gmr/.env, exchanges a Twitch token, and pulls:
-  - games_top.jsonl        top games by rating_count (target ~20k)
+  - games_top.jsonl        top games by rating_count (target ~50k)
   - games_extra.jsonl      franchise/collection siblings of the demo games
   - genres/themes/platforms/game_modes/player_perspectives/franchises/
     collections .jsonl     full attribute tables (small)
@@ -16,13 +16,13 @@ import json, os, subprocess, sys, time
 BASE = "https://api.igdb.com/v4"
 RAW = os.path.expanduser("~/gmr-data/raw")
 DEMO_GAMES = [119133, 113112, 17000, 119171]  # Elden Ring, Hades, Stardew, BG3
-TARGET_GAMES = 20000
+TARGET_GAMES = 50000
 GAME_FIELDS = ("id,name,slug,rating,rating_count,aggregated_rating,"
                "aggregated_rating_count,total_rating,total_rating_count,"
                "first_release_date,summary,cover,category,status,parent_game,"
                "version_parent,genres,themes,platforms,franchises,collections,"
-               "game_modes,player_perspectives,similar_games,involved_companies,"
-               "dlcs,expansions,remakes,remasters")
+               "game_modes,player_perspectives,similar_games,game_engines,"
+               "involved_companies,dlcs,expansions,remakes,remasters")
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
@@ -91,7 +91,7 @@ def main():
     for fn in ["games_top.jsonl", "games_extra.jsonl", "genres.jsonl",
                "themes.jsonl", "platforms.jsonl", "game_modes.jsonl",
                "player_perspectives.jsonl", "franchises.jsonl",
-               "collections.jsonl"]:
+               "collections.jsonl", "game_engines.jsonl"]:
         open(os.path.join(RAW, fn), "w").close()
     manifest = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 
@@ -140,6 +140,7 @@ def main():
         ("platforms", "id,name,slug,abbreviation"),
         ("game_modes", "id,name,slug"), ("player_perspectives", "id,name,slug"),
         ("franchises", "id,name,slug"), ("collections", "id,name,slug"),
+        ("game_engines", "id,name,slug"),
     ]:
         rows = paginate(ep, fields, fname=f"{ep}.jsonl")
         manifest[ep] = len(rows)

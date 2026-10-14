@@ -40,12 +40,14 @@ def main():
         log("no existing graph to delete")
 
     for label in ["Game", "Genre", "Theme", "Platform", "Company",
-                  "Franchise", "Collection", "GameMode", "PlayerPerspective"]:
+                  "Franchise", "Collection", "GameMode", "PlayerPerspective",
+                  "Engine"]:
         g.query(f"CREATE INDEX FOR (n:{label}) ON (n.igdb_id)")
 
     # ---- games (dedupe across slice files) ----
     games = {}
-    for fn in ["games_top.jsonl", "games_extra.jsonl", "games_queercade.jsonl"]:
+    for fn in ["games_top.jsonl", "games_extra.jsonl", "games_topup.jsonl",
+               "games_queercade.jsonl"]:
         for row in read_jsonl(fn):
             games.setdefault(row["id"], row)
     # collections were pulled separately (IGDB renamed collection -> collections)
@@ -77,6 +79,7 @@ def main():
                   ("player_perspectives.jsonl", "PlayerPerspective"),
                   ("franchises.jsonl", "Franchise"),
                   ("collections.jsonl", "Collection"),
+                  ("game_engines.jsonl", "Engine"),
                   ("companies.jsonl", "Company")]
     for fname, label in attr_specs:
         rows = [{"igdb_id": r["id"], "name": r.get("name") or "",
@@ -133,6 +136,40 @@ def main():
                "UNWIND $rows AS r MATCH (g:Game {igdb_id: r.g}) "
                "MATCH (t:Collection {igdb_id: r.t}) CREATE (g)-[:IN_COLLECTION]->(t)",
                "IN_COLLECTION")
+    edge_batch(collect("game_engines"),
+               "UNWIND $rows AS r MATCH (g:Game {igdb_id: r.g}) "
+               "MATCH (t:Engine {igdb_id: r.t}) CREATE (g)-[:HAS_ENGINE]->(t)",
+               "HAS_ENGINE")
+
+    # ---- lineage: Game -> Game version family edges ----
+    # parent_game / version_parent sit on the child record; dlcs /
+    # expansions / remakes / remasters sit on the parent record, so those
+    # pairs are inverted (the listed game points back at the record owner).
+    def dedupe(pairs):
+        seen, out = set(), []
+        for p in pairs:
+            k = (p["g"], p["t"])
+            if k not in seen and p["g"] != p["t"]:
+                seen.add(k)
+                out.append(p)
+        return out
+
+    def lineage_batch(pairs, etype):
+        edge_batch(dedupe([p for p in pairs
+                           if p["g"] in game_ids and p["t"] in game_ids]),
+                   "UNWIND $rows AS r MATCH (a:Game {igdb_id: r.g}) "
+                   f"MATCH (b:Game {{igdb_id: r.t}}) CREATE (a)-[:{etype}]->(b)",
+                   etype)
+
+    lineage_batch(collect("parent_game", single=True), "PART_OF")
+    lineage_batch(collect("version_parent", single=True), "VERSION_OF")
+    for field, etype in [("dlcs", "DLC_OF"), ("expansions", "EXPANSION_OF"),
+                         ("remakes", "REMAKE_OF"), ("remasters", "REMASTER_OF")]:
+        inv = []
+        for r in games:
+            for child in r.get(field) or []:
+                inv.append({"g": child, "t": r["id"]})
+        lineage_batch(inv, etype)
 
     # ---- company edges from involved_companies ----
     role_edges = [("developer", "DEVELOPED_BY"), ("publisher", "PUBLISHED_BY"),
@@ -161,7 +198,7 @@ def main():
     # Query-time hub suppression filters on this property; computing degrees
     # inline per candidate is far too slow.
     for label in ["Genre", "Theme", "Platform", "Company", "Franchise",
-                  "Collection", "GameMode", "PlayerPerspective"]:
+                  "Collection", "GameMode", "PlayerPerspective", "Engine"]:
         g.query(f"MATCH (x:{label}) SET x.degree = size([(x)--(:Game) | 1])")
     log("degree pass done")
 
