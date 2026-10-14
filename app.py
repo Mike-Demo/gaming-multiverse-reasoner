@@ -160,19 +160,25 @@ class H(BaseHTTPRequestHandler):
                 port = int(q.get("port", ["6379"])[0])
             except ValueError:
                 return self._send(400, json.dumps({"ok": False, "error": "bad port"}))
+            stage = "connect"
             try:
                 s = socket.create_connection((HOST, port), timeout=8)
-                s.settimeout(3)
-                try:
-                    banner = s.recv(128).decode("utf-8", "replace")
-                except socket.timeout:
-                    banner = ""
+                s.settimeout(6)
+                stage = "read/write"
+                if port == 6379:
+                    s.sendall(b"PING\r\n")
+                    data = s.recv(256)
+                elif port == 3000:
+                    s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n")
+                    data = s.recv(256)
+                else:
+                    data = s.recv(256)
                 s.close()
-                return self._send(200, json.dumps({"ok": True, "port": port,
-                                                   "tcp": "open", "banner": banner[:80]}))
+                return self._send(200, json.dumps({"ok": True, "port": port, "stage": stage,
+                                                   "reply": data.decode("utf-8", "replace")[:120]}))
             except Exception as e:
-                return self._send(200, json.dumps({"ok": False, "port": port,
-                                                   "tcp": f"{type(e).__name__}: {e}"}))
+                return self._send(200, json.dumps({"ok": False, "port": port, "stage": stage,
+                                                   "error": f"{type(e).__name__}: {e}"}))
         if self.path == "/healthz":
             return self._send(200, json.dumps({"ok": True}))
         if self.path == "/api/graph-check":
