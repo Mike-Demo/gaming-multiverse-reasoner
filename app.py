@@ -152,6 +152,27 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if self.path.startswith("/api/probe"):
+            # TCP probe of the VSI's own ports only (diagnostics + gate check 4)
+            from urllib.parse import urlparse, parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                port = int(q.get("port", ["6379"])[0])
+            except ValueError:
+                return self._send(400, json.dumps({"ok": False, "error": "bad port"}))
+            try:
+                s = socket.create_connection((HOST, port), timeout=8)
+                s.settimeout(3)
+                try:
+                    banner = s.recv(128).decode("utf-8", "replace")
+                except socket.timeout:
+                    banner = ""
+                s.close()
+                return self._send(200, json.dumps({"ok": True, "port": port,
+                                                   "tcp": "open", "banner": banner[:80]}))
+            except Exception as e:
+                return self._send(200, json.dumps({"ok": False, "port": port,
+                                                   "tcp": f"{type(e).__name__}: {e}"}))
         if self.path == "/healthz":
             return self._send(200, json.dumps({"ok": True}))
         if self.path == "/api/graph-check":
