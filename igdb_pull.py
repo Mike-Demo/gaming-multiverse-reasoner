@@ -20,7 +20,7 @@ TARGET_GAMES = 20000
 GAME_FIELDS = ("id,name,slug,rating,rating_count,aggregated_rating,"
                "aggregated_rating_count,total_rating,total_rating_count,"
                "first_release_date,summary,cover,category,status,parent_game,"
-               "version_parent,genres,themes,platforms,franchises,collection,"
+               "version_parent,genres,themes,platforms,franchises,collections,"
                "game_modes,player_perspectives,similar_games,involved_companies,"
                "dlcs,expansions,remakes,remasters")
 
@@ -116,13 +116,13 @@ def main():
                 by_id[gid] = g
         for f in g.get("franchises", []) or []:
             fr_ids.add(f)
-        if g.get("collection"):
-            col_ids.add(g["collection"])
+        for c in g.get("collections", []) or []:
+            col_ids.add(c)
     extra_where = []
     if fr_ids:
         extra_where.append("franchises = (" + ",".join(map(str, sorted(fr_ids))) + ")")
     if col_ids:
-        extra_where.append("collection = (" + ",".join(map(str, sorted(col_ids))) + ")")
+        extra_where.append("collections = (" + ",".join(map(str, sorted(col_ids))) + ")")
     extra = []
     if extra_where:
         extra = paginate("games", GAME_FIELDS, where=" | ".join(extra_where),
