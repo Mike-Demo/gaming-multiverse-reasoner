@@ -176,7 +176,7 @@ class H(BaseHTTPRequestHandler):
             except ValueError:
                 return self._send(400, json.dumps({"ok": False, "error": "bad port"}))
             host = q.get("host", [HOST])[0]
-            if host not in (HOST, "174.37.172.19", "1.1.1.1"):
+            if host not in (HOST, "174.37.172.19", "1.1.1.1", "ssh.github.com"):
                 return self._send(400, json.dumps({"ok": False, "error": "host not allowed"}))
             stage = "connect"
             try:
