@@ -753,6 +753,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "graph": GRAPH,
                             "games": rows[0][0] if rows else 0,
                             "connected_as": READER})
+            elif self.path.startswith("/docs"):
+                self._text(LICENSES_PAGE, "text/html; charset=utf-8")
             elif self.path.startswith("/licenses"):
                 self._text(LICENSES_PAGE, "text/html; charset=utf-8")
             elif self.path.startswith("/llms.txt"):
@@ -820,6 +822,9 @@ PAGE = r"""<!DOCTYPE html>
 <meta property="og:title" content="Gaming Multiverse Reasoner">
 <meta property="og:description" content="Hidden paths between any games, computed live in FalkorDB and narrated by IBM watsonx.">
 <meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Gaming Multiverse Reasoner">
+<meta name="twitter:description" content="Hidden paths between any games, computed live in FalkorDB and narrated by IBM watsonx.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
 {"@type":"WebApplication","name":"Gaming Multiverse Reasoner",
@@ -890,7 +895,7 @@ svg{height:430px}button{padding:13px 16px}.panel{padding:13px}}
 cursor:pointer;background:#10151d}.path:hover{border-color:var(--acc2)}
 .path.active{border-color:var(--acc);background:#12241a}
 .kind{font-size:11px;color:var(--acc2);text-transform:uppercase;letter-spacing:.06em}
-.path details{margin-top:5px}.path code{font-size:11px;color:var(--dim);
+.path details{margin-top:5px}.path summary{min-height:24px;padding:5px 0;cursor:pointer}.path code{font-size:11px;color:var(--dim);
 white-space:pre-wrap;word-break:break-word}
 .claim{border-left:3px solid var(--acc2);padding:6px 10px;margin:8px 0;
 background:#10151d;cursor:pointer}.claim:hover{border-color:var(--acc)}
@@ -1045,7 +1050,6 @@ function renderPaths(){
       <details><summary class="small">Cypher</summary><code>${p.cypher}</code></details>`;
       d.onclick=()=>setActive([p.path_id],d);
       d.tabIndex=0;d.setAttribute('role','button');
-      d.setAttribute('aria-label','Highlight path '+p.path_id+': '+p.description);
       d.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){
         e.preventDefault();setActive([p.path_id],d)}};
       el.appendChild(d)});
@@ -1191,7 +1195,8 @@ function renderGraph(){
     const gEl=document.createElementNS(NS,'g');
     gEl.setAttribute('class','node');gEl.dataset.key=n.key;
     gEl.setAttribute('tabindex','0');gEl.setAttribute('role','button');
-    gEl.setAttribute('aria-label','Highlight paths through '+n.name);
+    gEl.setAttribute('aria-label',
+      (n.name.length>22?n.name.slice(0,21)+'…':n.name)+' — highlight paths');
     gEl.style.animationDelay=(idx*35)+'ms';
     const r=sel.has(n.key)?17:(n.label==='Game'?13:9);
     if(sel.has(n.key)){
