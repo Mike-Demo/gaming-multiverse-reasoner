@@ -774,6 +774,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._text(LICENSES_PAGE, "text/html; charset=utf-8")
             elif self.path.startswith("/llms.txt"):
                 self._text(LLMS_TXT)
+            elif self.path.startswith("/carbon.txt"):
+                self._text(CARBON_TXT)
             elif self.path.startswith("/robots.txt"):
                 self._text(ROBOTS_TXT)
             elif self.path.startswith("/sitemap.xml"):
@@ -979,7 +981,7 @@ WeMakeDevs × FalkorDB Graph Hacks hackathon.</p>
 <a href="https://bsky.app/profile/mikedemo.bsky.social">Bluesky</a></p>
 <p><a href="https://github.com/Mike-Demo/gaming-multiverse-reasoner">Source on GitHub</a> ·
 <a href="/licenses">Licenses &amp; tech stack</a> ·
-<a href="/llms.txt">llms.txt</a> · MCP server: <code>POST /mcp</code> (tools listed in llms.txt)</p>
+<a href="/llms.txt">llms.txt</a> · <a href="/carbon.txt">carbon.txt</a> · MCP server: <code>POST /mcp</code> (tools listed in llms.txt)</p>
 <p>MIT licensed. Game data from IGDB (Twitch), snapshot frozen 14 Oct 2026 ·
 Communities are precomputed (weighted label propagation) and labelled as such.</p>
 </footer>
@@ -1414,7 +1416,7 @@ every path shown is computed live in FalkorDB at request time.</p>
 <a href="https://facebook.com/mikedemo42">Facebook</a> ·
 <a href="https://bsky.app/profile/mikedemo.bsky.social">Bluesky</a> ·
 <a href="https://github.com/Mike-Demo/gaming-multiverse-reasoner">Source</a> ·
-<a href="/llms.txt">llms.txt</a></p>
+<a href="/llms.txt">llms.txt</a> · <a href="/carbon.txt">carbon.txt</a></p>
 <p>MIT licensed. Game data from IGDB (Twitch), snapshot frozen 14 Oct 2026.</p>
 </footer>
 <script src="/co2.min.js" defer></script>
@@ -1502,11 +1504,30 @@ Allow: /
 Sitemap: https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/sitemap.xml
 """
 
+CARBON_TXT = """version = "0.6"
+last_updated = 2026-10-15
+
+[[org.disclosures]]
+doc_type = "web-page"
+url = "https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/"
+title = "Per-visit carbon estimate for this site"
+description = "Every page footer shows a per-visit CO2e estimate computed locally in the browser with CO2.js (The Green Web Foundation, SWD model v4) from transferred bytes. No external calls are made to produce it."
+
+[[upstream.services]]
+domain = "ibm.com"
+service_type = "cloud-hosting"
+
+[[upstream.services]]
+domain = "github.com"
+service_type = "code-hosting"
+"""
+
 SITEMAP_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/</loc></url>
   <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/licenses</loc></url>
   <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/llms.txt</loc></url>
+  <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/carbon.txt</loc></url>
 </urlset>
 """
 
