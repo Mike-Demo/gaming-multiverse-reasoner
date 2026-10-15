@@ -856,6 +856,10 @@ padding:11px 18px;min-height:44px;font-weight:700;cursor:pointer;font-size:15px}
 button.secondary{background:#26314a;color:var(--txt)}
 button:disabled{opacity:.5}
 #go{margin-top:12px}
+.share{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.shbtn{background:#26314a;color:var(--txt);border:0;border-radius:8px;
+padding:10px 14px;min-height:44px;font-weight:600;cursor:pointer;font-size:14px;
+text-decoration:none;display:inline-flex;align-items:center}
 svg{width:100%;height:560px;background:#0a0e14;border-radius:10px}
 .edge{stroke:#3d4a5f;stroke-width:1.4;stroke-dasharray:3 6;
 animation:flow 1.4s linear infinite}
@@ -922,7 +926,13 @@ cite the graph’s own path IDs — citations are validated in code.</p></header
  <div class="panel"><div class="slots" id="slots"></div>
  <button id="go">Find the hidden paths</button>
  <button class="secondary" id="rand">🎲 Surprise me — 4 random games</button>
- <span class="small" id="status" role="status" aria-live="polite"></span></div>
+ <span class="small" id="status" role="status" aria-live="polite"></span>
+ <div class="share" id="share" style="display:none">
+ <span class="small">Share these connections:</span>
+ <a class="shbtn" id="sh-x" target="_blank" rel="noopener">Post to X</a>
+ <a class="shbtn" id="sh-threads" target="_blank" rel="noopener">Threads</a>
+ <a class="shbtn" id="sh-bsky" target="_blank" rel="noopener">Bluesky</a>
+ <button class="shbtn" id="sh-copy" type="button">Copy link</button></div></div>
  <div class="panel"><svg id="graph" viewBox="0 0 900 560" role="img" aria-label="Graph of the paths connecting the selected games. Tab to a node and press Enter to highlight its paths."></svg>
  <div class="small">Tap or click any node, path or claim to highlight its connections.</div></div>
 </div>
@@ -1017,6 +1027,7 @@ document.getElementById('go').onclick=async()=>{
     st.textContent=` done in ${DATA.stats.took_ms} ms · ${DATA.pairs.reduce((n,p)=>n+p.paths.length,0)} paths`;
     renderGraph();renderPaths();renderComms();
     document.getElementById('narrate').disabled=false;
+    updateShare();
   }catch(e){st.innerHTML=' <span class="err">'+e.message+'</span>'}
   document.getElementById('go').disabled=false;
 };
@@ -1210,9 +1221,16 @@ function renderGraph(){
 // browsers. The hosted MCP server at POST /mcp is the canonical interface.
 if(navigator.modelContext&&navigator.modelContext.registerTool){
   const wmcp=(name,description,inputSchema,fn)=>{
-    try{navigator.modelContext.registerTool({name,description,inputSchema,
-      execute:async(args)=>{const r=await fn(args||{});
-        return{content:[{type:'text',text:JSON.stringify(r)}]}}}})}catch(e){}};
+    try{
+      navigator.modelContext.registerTool({
+        name:name, description:description, inputSchema:inputSchema,
+        execute:async(args)=>{
+          const r=await fn(args||{});
+          return {content:[{type:'text', text:JSON.stringify(r)}]};
+        }
+      });
+    }catch(e){}
+  };
   wmcp('resolve_game','Find IGDB games matching a title fragment.',
     {type:'object',properties:{query:{type:'string'}},required:['query']},
     async a=>{const r=await fetch('/api/resolve?q='+encodeURIComponent(a.query));
@@ -1226,8 +1244,52 @@ if(navigator.modelContext&&navigator.modelContext.registerTool){
     {type:'object',properties:{}},
     async()=>{const r=await fetch('/api/random');return await r.json()});
 }
-// Open on the demo graph: run the default four-game query immediately.
-document.getElementById('go').click();
+// Shareable links: the current set lives in ?games=id,id,... — post it to
+// X / Threads / Bluesky or copy the URL. Opening such a link runs that set.
+function shareUrl(){const ids=selected.filter(Boolean).map(s=>s.igdb_id);
+  return location.origin+'/?games='+ids.join(',')}
+function updateShare(){if(!DATA)return;
+  const ids=selected.filter(Boolean).map(s=>s.igdb_id);
+  if(ids.length<2)return;
+  const names=DATA.games.map(g=>g.name);
+  const total=DATA.pairs.reduce((n,p)=>n+p.paths.length,0);
+  const text=names.join(' \u2194 ')+' \u2014 '+total+
+    ' hidden paths connect them in the Gaming Multiverse Reasoner \uD83D\uDD79\uFE0F';
+  const url=shareUrl();
+  document.getElementById('sh-x').href=
+    'https://twitter.com/intent/tweet?text='+encodeURIComponent(text)+
+    '&url='+encodeURIComponent(url);
+  document.getElementById('sh-threads').href=
+    'https://www.threads.net/intent/post?text='+
+    encodeURIComponent(text+' '+url);
+  document.getElementById('sh-bsky').href=
+    'https://bsky.social/intent/compose?text='+
+    encodeURIComponent(text+' '+url);
+  document.getElementById('share').style.display='flex';
+  history.replaceState(null,'','?games='+ids.join(','))}
+document.getElementById('sh-copy').onclick=async()=>{
+  const st=document.getElementById('status');
+  try{await navigator.clipboard.writeText(shareUrl());
+    st.textContent=' link copied \u2014 share it anywhere'}
+  catch(e){window.prompt('Copy your share link:',shareUrl())}};
+// Open on the demo graph, or on the shared set when the URL carries one.
+(async()=>{const m=new URLSearchParams(location.search).get('games');
+  if(m){const ids=m.split(',').map(Number).filter(n=>n>0).slice(0,4);
+    if(ids.length>=2){try{
+      const r=await fetch('/api/bridges?ids='+ids.join(','));
+      const d=await r.json();
+      if(!d.error&&d.games&&d.games.length>=2){DATA=d;
+        d.games.forEach((g,i)=>{selected[i]={name:g.name,igdb_id:g.igdb_id};
+          const inp=document.getElementById('in'+i);if(inp)inp.value=g.name});
+        for(let i=d.games.length;i<4;i++){selected[i]=null;
+          const inp=document.getElementById('in'+i);if(inp)inp.value=''}
+        document.getElementById('status').textContent=
+          ` done in ${d.stats.took_ms} ms \u00B7 ${d.pairs.reduce((n,p)=>n+p.paths.length,0)} paths`;
+        renderGraph();renderPaths();renderComms();
+        document.getElementById('narrate').disabled=false;
+        updateShare();return}
+    }catch(e){}}}
+  document.getElementById('go').click()})();
 </script></body></html>
 """
 
