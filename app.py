@@ -706,6 +706,21 @@ def api_narrate(payload):
                        for f in facts[:6]]}
 
 
+# CO2.js per-visit estimate assets (@tgwf/co2 v0.19.0, SWD v4), served
+# locally so the estimate makes no external calls. See co2-footer.js.
+def _read_asset(name):
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               name), "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+
+
+CO2_MIN_JS = _read_asset("co2.min.js")
+CO2_FOOTER_JS = _read_asset("co2-footer.js")
+
+
 # ---------- HTTP ----------
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -767,6 +782,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(AGENT_CARD)
             elif self.path.startswith("/openapi.json"):
                 self._json(OPENAPI)
+            elif self.path.startswith("/co2.min.js"):
+                self._text(CO2_MIN_JS, "application/javascript; charset=utf-8")
+            elif self.path.startswith("/co2-footer.js"):
+                self._text(CO2_FOOTER_JS,
+                           "application/javascript; charset=utf-8")
             elif self.path.startswith("/mcp"):
                 self._json({"name": "gaming-multiverse-reasoner",
                             "version": "1.0.0",
@@ -1295,7 +1315,10 @@ document.getElementById('sh-copy').onclick=async()=>{
         updateShare();return}
     }catch(e){}}}
   document.getElementById('go').click()})();
-</script></body></html>
+</script>
+<script src="/co2.min.js" defer></script>
+<script src="/co2-footer.js" defer></script>
+</body></html>
 """
 
 
@@ -1394,6 +1417,8 @@ every path shown is computed live in FalkorDB at request time.</p>
 <a href="/llms.txt">llms.txt</a></p>
 <p>MIT licensed. Game data from IGDB (Twitch), snapshot frozen 14 Oct 2026.</p>
 </footer>
+<script src="/co2.min.js" defer></script>
+<script src="/co2-footer.js" defer></script>
 </body></html>
 """
 
