@@ -1,0 +1,72 @@
+# Gaming Multiverse Reasoner
+
+> Pick any set of games and see the hidden paths, bridge games and communities
+> that connect them. Every path is computed live in FalkorDB from a frozen
+> IGDB snapshot; IBM watsonx (Granite) narrates the results, and every claim it
+> makes is validated in code against real path ids.
+
+Live app: https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud
+Source: https://github.com/Mike-Demo/gaming-multiverse-reasoner
+Licenses and full tech stack: https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/licenses
+
+## Data
+
+- 50,217 games from the IGDB API (Twitch), pulled and frozen 14 Oct 2026,
+  including the full QueerCade catalogue (753 games).
+- Graph "multiverse" in FalkorDB: 84,296 nodes / 1,023,292 relationships.
+  Node labels: Game, Company, Genre, Theme, GameMode, Platform,
+  PlayerPerspective, Franchise, Collection, Engine.
+- Snapshot frozen in IBM Cloud Object Storage as
+  snapshot/igdb-raw-2026-10-14-v2.tar.gz with snapshot/manifest-v2.json.
+- Communities are PRECOMPUTED (weighted label propagation over similar-game
+  links, 6,234 communities) and labelled as such wherever they appear.
+
+## Method (honesty rules)
+
+- Paths are computed live at request time with Cypher; each path response
+  includes the Cypher used.
+- Hub suppression: Platform and GameMode nodes never appear in paths; Genre,
+  Theme and Engine nodes shared by more than 12,000 games are suppressed;
+  company bridges cap company degree at 800.
+- Path kinds: lineage (remake/remaster/DLC/expansion/version/part-of),
+  company-bridge, similar-chain (shortest path over SIMILAR_TO),
+  common-neighbor, shared (shared attribute neighbour).
+- Narration claims must cite path_ids from the computed result; claims are
+  validated in code and dropped if they cite anything else. If watsonx is
+  unavailable, template claims are served and labelled source: "template".
+
+## REST API (JSON, no auth, read-only)
+
+- GET /api/health — graph name, game count, connected user.
+- GET /api/resolve?q=<title fragment> — matching games (igdb_id, name, year,
+  rating_count).
+- GET /api/bridges?ids=<id,id[,id[,id]]> — 2 to 4 IGDB ids; returns per-pair
+  paths with path_id, kind, templated description and the Cypher used, plus
+  per-game community info and stats.took_ms.
+- GET /api/random — 4 random games, validated so every pair connects.
+- POST /api/narrate — body: a /api/bridges response; returns claims citing
+  path_ids, with source "watsonx" or "template".
+- GET /openapi.json — OpenAPI 3 description of this API.
+- Errors are JSON: {"error": "..."} with an HTTP status code.
+
+## MCP server (for AI agents)
+
+- Endpoint: POST https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/mcp
+- Transport: Model Context Protocol over streamable HTTP, JSON responses.
+  JSON-RPC 2.0. Send initialize, then tools/list / tools/call.
+- Tools:
+  - resolve_game {query: string} — find games by title fragment.
+  - find_paths {games: [name-or-id, ...]} — 2-4 games by name or IGDB id;
+    names are resolved to their top match; returns the full paths payload.
+  - random_games {} — a validated random set of 4 connected games.
+  - game_community {igdb_id: number} — one game's community, peers, summary.
+  - narrate {ids: [number, ...]} — paths plus watsonx narration claims.
+- GET /mcp returns server info as JSON. GET /.well-known/agent.json is an
+  A2A-style agent card describing the same capabilities.
+
+## Limits
+
+- Read-only demo: no authentication, no writes, no state changes.
+- Graph queries are capped by a 5,000 ms FalkorDB timeout; the demo
+  four-game query typically answers in under 2 seconds.
+- Please be gentle: this is a hackathon demo on shared infrastructure.

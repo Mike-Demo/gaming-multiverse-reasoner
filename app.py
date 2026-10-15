@@ -711,6 +711,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _text(self, body, ctype="text/plain; charset=utf-8", status=200):
+        data = body.encode() if isinstance(body, str) else body
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _json(self, obj, status=200):
         body = json.dumps(obj).encode()
         self.send_response(status)
@@ -745,6 +753,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "graph": GRAPH,
                             "games": rows[0][0] if rows else 0,
                             "connected_as": READER})
+            elif self.path.startswith("/licenses"):
+                self._text(LICENSES_PAGE, "text/html; charset=utf-8")
+            elif self.path.startswith("/llms.txt"):
+                self._text(LLMS_TXT)
+            elif self.path.startswith("/robots.txt"):
+                self._text(ROBOTS_TXT)
+            elif self.path.startswith("/sitemap.xml"):
+                self._text(SITEMAP_XML, "application/xml; charset=utf-8")
+            elif self.path.startswith("/.well-known/agent.json"):
+                self._json(AGENT_CARD)
+            elif self.path.startswith("/openapi.json"):
+                self._json(OPENAPI)
+            elif self.path.startswith("/mcp"):
+                self._json({"name": "gaming-multiverse-reasoner",
+                            "version": "1.0.0",
+                            "transport": "MCP streamable HTTP (JSON responses)",
+                            "endpoint": "POST /mcp",
+                            "tools": [t["name"] for t in MCP_TOOLS],
+                            "docs": "/llms.txt"})
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as e:
@@ -756,6 +783,27 @@ class Handler(BaseHTTPRequestHandler):
                 n = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(n) or b"{}")
                 self._json(api_narrate(payload))
+            elif self.path.startswith("/mcp"):
+                n = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(n) or b"{}"
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    self._json({"jsonrpc": "2.0", "id": None, "error":
+                                {"code": -32700, "message": "parse error"}}, 400)
+                    return
+                if isinstance(msg, list):
+                    rs = [r for r in (mcp_handle(m) for m in msg) if r]
+                    if rs:
+                        self._json(rs)
+                    else:
+                        self.send_response(202); self.end_headers()
+                else:
+                    resp = mcp_handle(msg)
+                    if resp is None:
+                        self.send_response(202); self.end_headers()
+                    else:
+                        self._json(resp)
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as e:
@@ -766,6 +814,22 @@ PAGE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gaming Multiverse Reasoner</title>
+<meta name="description" content="Pick any set of games and see the hidden paths, bridge games and communities connecting them — computed live in FalkorDB over a frozen snapshot of 50,217 IGDB games, narrated by IBM watsonx.">
+<meta name="author" content="Mike “Demo” Demopoulos">
+<meta name="theme-color" content="#0d1117">
+<meta property="og:title" content="Gaming Multiverse Reasoner">
+<meta property="og:description" content="Hidden paths between any games, computed live in FalkorDB and narrated by IBM watsonx.">
+<meta property="og:type" content="website">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"WebApplication","name":"Gaming Multiverse Reasoner",
+"applicationCategory":"EntertainmentApplication","operatingSystem":"Web",
+"description":"Finds hidden paths, bridge games and communities between any set of games, computed live in FalkorDB from a frozen IGDB snapshot of 50,217 games.",
+"author":{"@type":"Person","name":"Mike Demopoulos","url":"https://mikedemo.dev",
+"sameAs":["https://github.com/Mike-Demo","https://x.com/Mike_Demo",
+"https://facebook.com/mikedemo42","https://bsky.app/profile/mikedemo.bsky.social"]},
+"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}]}
+</script>
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--txt:#e6edf3;--dim:#8b949e;
 --acc:#7ee787;--acc2:#79c0ff;--warn:#f0b429}
@@ -788,7 +852,7 @@ border:1px solid var(--line);border-radius:8px;width:100%;max-height:230px;overf
 .dropdown div.sel{background:#26314a}
 .dropdown small{color:var(--dim)}
 button{background:var(--acc);color:#06280f;border:0;border-radius:8px;
-padding:11px 18px;font-weight:700;cursor:pointer;font-size:15px}
+padding:11px 18px;min-height:44px;font-weight:700;cursor:pointer;font-size:15px}
 button.secondary{background:#26314a;color:var(--txt)}
 button:disabled{opacity:.5}
 #go{margin-top:12px}
@@ -829,7 +893,19 @@ background:#10151d;cursor:pointer}.claim:hover{border-color:var(--acc)}
 .badge{font-size:11px;background:#26314a;border-radius:20px;padding:2px 8px;color:var(--acc2)}
 .comm{font-size:13px;color:var(--dim)}.comm b{color:var(--txt)}
 .err{color:#ff7b72}.small{font-size:12px;color:var(--dim)}
+footer{border-top:1px solid var(--line);margin-top:8px;padding:18px 24px 26px;
+color:var(--dim);font-size:13px;text-align:center}
+footer a{color:var(--acc2)}footer p{margin:4px 0}
+:focus-visible{outline:3px solid var(--acc2);outline-offset:2px}
+.skip{position:absolute;left:-999px;top:0;background:var(--acc);color:#06280f;
+padding:10px 16px;font-weight:700;z-index:20;border-radius:0 0 8px 0}
+.skip:focus{left:0}
+.node:focus{outline:none}.node:focus .hit{stroke:var(--acc2);stroke-width:2;fill-opacity:.08}
+@media (prefers-reduced-motion: reduce){
+.edge{animation:none}.node{animation:none}.node .pulse{animation:none}
+.slot input{transition:none}}
 </style></head><body>
+<a class="skip" href="#paths">Skip to results</a>
 <header><h1>🕹️ Gaming Multiverse Reasoner</h1>
 <p class="sub">Pick any set of games and see the <b>hidden paths</b>, <b>bridge
 games</b> and <b>communities</b> that connect them. Every path is computed live
@@ -846,8 +922,8 @@ cite the graph’s own path IDs — citations are validated in code.</p></header
  <div class="panel"><div class="slots" id="slots"></div>
  <button id="go">Find the hidden paths</button>
  <button class="secondary" id="rand">🎲 Surprise me — 4 random games</button>
- <span class="small" id="status"></span></div>
- <div class="panel"><svg id="graph" viewBox="0 0 900 560"></svg>
+ <span class="small" id="status" role="status" aria-live="polite"></span></div>
+ <div class="panel"><svg id="graph" viewBox="0 0 900 560" role="img" aria-label="Graph of the paths connecting the selected games. Tab to a node and press Enter to highlight its paths."></svg>
  <div class="small">Tap or click any node, path or claim to highlight its connections.</div></div>
 </div>
 <div id="right">
@@ -859,6 +935,19 @@ cite the graph’s own path IDs — citations are validated in code.</p></header
  <div class="panel"><b>Communities</b><div id="comms"><p class="small">—</p></div></div>
 </div>
 </main>
+<footer>
+<p>Built by <a href="https://mikedemo.dev">Mike “Demo” Demopoulos</a> for the
+WeMakeDevs × FalkorDB Graph Hacks hackathon.</p>
+<p><a href="https://github.com/Mike-Demo">GitHub</a> ·
+<a href="https://x.com/Mike_Demo">X</a> ·
+<a href="https://facebook.com/mikedemo42">Facebook</a> ·
+<a href="https://bsky.app/profile/mikedemo.bsky.social">Bluesky</a></p>
+<p><a href="https://github.com/Mike-Demo/gaming-multiverse-reasoner">Source on GitHub</a> ·
+<a href="/licenses">Licenses &amp; tech stack</a> ·
+<a href="/llms.txt">llms.txt</a> · MCP server: <code>POST /mcp</code> (tools listed in llms.txt)</p>
+<p>MIT licensed. Game data from IGDB (Twitch), snapshot frozen 14 Oct 2026 ·
+Communities are precomputed (weighted label propagation) and labelled as such.</p>
+</footer>
 <script>
 const DEMO=[["Elden Ring",119133],["Hades",113112],["Stardew Valley",17000],
 ["Baldur’s Gate III",119171]];
@@ -866,14 +955,21 @@ const slotsEl=document.getElementById('slots');
 let selected=DEMO.map(([name,id])=>({name,igdb_id:id}));
 DEMO.forEach(([name,id],i)=>{
   const d=document.createElement('div');d.className='slot';
-  d.innerHTML=`<label>Game ${i+1}</label><div class="results">
-  <input id="in${i}" value="${name}" autocomplete="off">
-  <div class="dropdown" id="dd${i}" style="display:none"></div></div>`;
+  d.innerHTML=`<label for="in${i}">Game ${i+1}</label><div class="results">
+  <input id="in${i}" value="${name}" autocomplete="off" role="combobox"
+   aria-autocomplete="list" aria-expanded="false" aria-controls="dd${i}">
+  <div class="dropdown" id="dd${i}" role="listbox" style="display:none"></div></div>`;
   slotsEl.appendChild(d);
   const inp=d.querySelector('input'),dd=d.querySelector('.dropdown');
   let timer,items=[],hi=-1;
-  const closeDD=()=>{dd.style.display='none';hi=-1};
-  const paint=()=>{[...dd.children].forEach((c,k)=>c.classList.toggle('sel',k===hi))};
+  const closeDD=()=>{dd.style.display='none';hi=-1;
+    inp.setAttribute('aria-expanded','false');
+    inp.removeAttribute('aria-activedescendant')};
+  const paint=()=>{[...dd.children].forEach((c,k)=>{
+    c.classList.toggle('sel',k===hi);
+    c.setAttribute('aria-selected',k===hi?'true':'false')});
+    if(hi>=0&&dd.children[hi])inp.setAttribute('aria-activedescendant',dd.children[hi].id);
+    else inp.removeAttribute('aria-activedescendant')};
   const pick=g=>{if(!g)return;selected[i]={name:g.name,igdb_id:g.igdb_id};
     inp.value=g.name;closeDD()};
   inp.addEventListener('input',()=>{clearTimeout(timer);
@@ -883,15 +979,18 @@ DEMO.forEach(([name,id],i)=>{
       const j=await r.json();items=j.results||[];hi=items.length?0:-1;
       dd.innerHTML='';
       if(!items.length){const o=document.createElement('div');
+        o.setAttribute('role','option');o.setAttribute('aria-disabled','true');
         o.innerHTML='<small>No matches — try another title</small>';
         dd.appendChild(o)}
       items.forEach((g,k)=>{
         const o=document.createElement('div');
+        o.setAttribute('role','option');o.id='dd'+i+'o'+k;
+        o.setAttribute('aria-selected','false');
         o.innerHTML=`${g.name} <small>${g.year||''} · ★${g.rating_count}</small>`;
         o.onmouseenter=()=>{hi=k;paint()};
         o.onclick=()=>pick(g);
         dd.appendChild(o)});
-      paint();
+      paint();inp.setAttribute('aria-expanded','true');
       dd.style.display='block';
     },220)});
   inp.addEventListener('keydown',e=>{
@@ -934,6 +1033,10 @@ function renderPaths(){
       <span class="badge">${p.path_id}</span><br>${p.description}
       <details><summary class="small">Cypher</summary><code>${p.cypher}</code></details>`;
       d.onclick=()=>setActive([p.path_id],d);
+      d.tabIndex=0;d.setAttribute('role','button');
+      d.setAttribute('aria-label','Highlight path '+p.path_id+': '+p.description);
+      d.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){
+        e.preventDefault();setActive([p.path_id],d)}};
       el.appendChild(d)});
   });
 }
@@ -978,6 +1081,10 @@ document.getElementById('narrate').onclick=async()=>{
       const d=document.createElement('div');d.className='claim';
       d.innerHTML=c.text+' <span class="badge">'+c.path_ids.join(', ')+'</span>';
       d.onclick=()=>setActive(c.path_ids,null);
+      d.tabIndex=0;d.setAttribute('role','button');
+      d.setAttribute('aria-label','Highlight paths '+c.path_ids.join(', '));
+      d.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){
+        e.preventDefault();setActive(c.path_ids,null)}};
       box.appendChild(d)});
     if(j.note){const n=document.createElement('p');n.className='small';
       n.textContent=j.note;box.appendChild(n)}
@@ -996,10 +1103,12 @@ document.getElementById('rand').onclick=async()=>{
   const inputs=[0,1,2,3].map(i=>document.getElementById('in'+i));
   inputs.forEach(inp=>{inp.classList.add('spinning');
     inp.classList.remove('landed')});
-  const spin=setInterval(()=>{inputs.forEach(inp=>{
+  const REDUCED=window.matchMedia&&
+    matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const spin=REDUCED?null:setInterval(()=>{inputs.forEach(inp=>{
     if(inp.classList.contains('spinning'))
       inp.value=FILLER[Math.floor(Math.random()*FILLER.length)]})},70);
-  const stopSpin=()=>{clearInterval(spin);
+  const stopSpin=()=>{if(spin)clearInterval(spin);
     inputs.forEach(inp=>inp.classList.remove('spinning'))};
   try{
     const r=await fetch('/api/random');const j=await r.json();
@@ -1070,6 +1179,8 @@ function renderGraph(){
   arr.forEach((n,idx)=>{
     const gEl=document.createElementNS(NS,'g');
     gEl.setAttribute('class','node');gEl.dataset.key=n.key;
+    gEl.setAttribute('tabindex','0');gEl.setAttribute('role','button');
+    gEl.setAttribute('aria-label','Highlight paths through '+n.name);
     gEl.style.animationDelay=(idx*35)+'ms';
     const r=sel.has(n.key)?17:(n.label==='Game'?13:9);
     if(sel.has(n.key)){
@@ -1091,13 +1202,402 @@ function renderGraph(){
     gEl.appendChild(c);gEl.appendChild(t);gEl.appendChild(hit);
     gEl.onclick=()=>{const pids=nodePids[n.key]||[];
       if(pids.length)setActive(pids,null)};
+    gEl.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();
+      const pids=nodePids[n.key]||[];if(pids.length)setActive(pids,null)}};
     svg.appendChild(gEl)});
+}
+// Experimental WebMCP: expose the same tools to AI agents in supporting
+// browsers. The hosted MCP server at POST /mcp is the canonical interface.
+if(navigator.modelContext&&navigator.modelContext.registerTool){
+  const wmcp=(name,description,inputSchema,fn)=>{
+    try{navigator.modelContext.registerTool({name,description,inputSchema,
+      execute:async(args)=>{const r=await fn(args||{});
+        return{content:[{type:'text',text:JSON.stringify(r)}]}}}})}catch(e){}};
+  wmcp('resolve_game','Find IGDB games matching a title fragment.',
+    {type:'object',properties:{query:{type:'string'}},required:['query']},
+    async a=>{const r=await fetch('/api/resolve?q='+encodeURIComponent(a.query));
+      return await r.json()});
+  wmcp('find_paths','Find the hidden paths connecting 2-4 games by IGDB id.',
+    {type:'object',properties:{ids:{type:'array',items:{type:'number'},
+      minItems:2,maxItems:4}},required:['ids']},
+    async a=>{const r=await fetch('/api/bridges?ids='+a.ids.join(','));
+      return await r.json()});
+  wmcp('random_games','Draw 4 random games whose pairs all connect.',
+    {type:'object',properties:{}},
+    async()=>{const r=await fetch('/api/random');return await r.json()});
 }
 // Open on the demo graph: run the default four-game query immediately.
 document.getElementById('go').click();
 </script></body></html>
 """
 
+
+
+# ---------------------------------------------------------------------------
+# Machine-readable surfaces: licenses page, llms.txt, robots, sitemap,
+# A2A agent card, OpenAPI, and an MCP server (streamable HTTP, JSON replies).
+# Added 2026-10-14 at Demo's request (footer + licenses + llms.txt + MCP,
+# Silicon Friendly surfaces, accessibility pass shipped in the same build).
+# ---------------------------------------------------------------------------
+
+PUBLIC_URL = "https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud"
+
+LICENSES_PAGE = r"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Licenses &amp; tech stack — Gaming Multiverse Reasoner</title>
+<meta name="description" content="Every open-source library, technology and hosted service the Gaming Multiverse Reasoner uses, top to bottom.">
+<style>
+body{margin:0;background:#0d1117;color:#e6edf3;
+font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 20px 10px}
+h1{font-size:24px}h2{font-size:18px;margin-top:30px;color:#7ee787}
+a{color:#79c0ff}table{border-collapse:collapse;width:100%;margin:10px 0}
+td,th{border:1px solid #30363d;padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#161b22}.dim{color:#8b949e}
+footer{border-top:1px solid #30363d;margin-top:26px;padding:18px 24px 26px;
+color:#8b949e;font-size:13px;text-align:center}footer p{margin:4px 0}
+:focus-visible{outline:3px solid #79c0ff;outline-offset:2px}
+</style></head><body>
+<main>
+<h1>Licenses &amp; tech stack</h1>
+<p>The Gaming Multiverse Reasoner, top to bottom. Two honesty notes first:
+the application and its data pipeline use <b>zero third-party packages</b> —
+everything is the Python standard library — and the browser UI is hand-written
+HTML/CSS/JavaScript with an inline SVG force layout. No frameworks, no CDN
+assets, no trackers.</p>
+
+<h2>This project's code</h2>
+<p><b>MIT License</b> — Copyright (c) 2026 Mike Demopoulos.
+Source: <a href="https://github.com/Mike-Demo/gaming-multiverse-reasoner">github.com/Mike-Demo/gaming-multiverse-reasoner</a>.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files, to deal in the software
+without restriction, including without limitation the rights to use, copy,
+modify, merge, publish, distribute, sublicense, and/or sell copies, subject to
+including the copyright notice and this permission notice in all copies.</p>
+
+<h2>Open-source components</h2>
+<table>
+<tr><th>Component</th><th>Role</th><th>License</th></tr>
+<tr><td>FalkorDB</td><td>Graph database holding the 50,217-game multiverse graph; all path queries are Cypher run live against it</td><td>SSPL-1.0</td></tr>
+<tr><td>Redis</td><td>Storage engine FalkorDB is built on (RESP protocol, ACL reader user)</td><td>Tri-license: RSALv2 / SSPLv1 / AGPLv3</td></tr>
+<tr><td>Python 3.12</td><td>Application runtime — standard library only (http.server), including the MCP server and the RESP client</td><td>PSF License 2.0</td></tr>
+<tr><td>IBM Granite 4 H Small</td><td>The narration model served by watsonx.ai (ibm/granite-4-h-small)</td><td>Apache-2.0 (model)</td></tr>
+<tr><td>Docker Engine</td><td>Runs FalkorDB on the VPC virtual server and builds the app image</td><td>Apache-2.0</td></tr>
+<tr><td>Ubuntu 24.04 LTS</td><td>Operating system of the FalkorDB virtual server</td><td>Various free/open-source licenses</td></tr>
+<tr><td>Debian (python:3.12-slim)</td><td>Base image of the application container</td><td>DFSG-free licenses</td></tr>
+<tr><td>openCypher</td><td>The graph query language every path query is written in</td><td>Apache-2.0 (open specification)</td></tr>
+<tr><td>Model Context Protocol</td><td>Agent interface exposed at POST /mcp</td><td>MIT (open specification)</td></tr>
+<tr><td>JSON-RPC 2.0</td><td>Wire format for the MCP server</td><td>Open specification</td></tr>
+</table>
+
+<h2>Hosted services (not open source — stated plainly)</h2>
+<table>
+<tr><th>Service</th><th>Role</th></tr>
+<tr><td>IBM Code Engine</td><td>Hosts this web app (min-scale 1, always warm)</td></tr>
+<tr><td>IBM VPC (bx2-4x16 VSI, us-south)</td><td>Hosts the FalkorDB container</td></tr>
+<tr><td>IBM Cloud Object Storage</td><td>Frozen data snapshots (igdb-raw-2026-10-14-v2.tar.gz + manifest)</td></tr>
+<tr><td>IBM Container Registry</td><td>Application container images</td></tr>
+<tr><td>IBM watsonx.ai</td><td>Serves the Granite model; narration runs in a deployment space</td></tr>
+<tr><td>IGDB API (Twitch)</td><td>Source of all game data — see attribution below</td></tr>
+<tr><td>GitHub</td><td>Source hosting for the project repository</td></tr>
+</table>
+
+<h2>Data &amp; attribution</h2>
+<p>Game data comes from the <b>IGDB API</b> (Twitch Entertainment, Inc.) —
+titles, ratings, companies, genres, themes, engines, franchises, collections
+and similarity links for 50,217 games, pulled 14 Oct 2026 and frozen in IBM
+Cloud Object Storage. The <b>QueerCade</b> catalogue (a project by the same
+author) is merged in so all 753 of its games are present. Communities are
+computed by this project's own weighted label-propagation implementation
+(communities.py, MIT as part of this project) — no third-party graph
+libraries. Precomputed and inferred material is labelled as such in the UI;
+every path shown is computed live in FalkorDB at request time.</p>
+<p class="dim">Built for the WeMakeDevs × FalkorDB “Graph Hacks” hackathon,
+14–18 Oct 2026.</p>
+</main>
+<footer>
+<p>Built by <a href="https://mikedemo.dev">Mike “Demo” Demopoulos</a> ·
+<a href="/">Back to the Multiverse Reasoner</a></p>
+<p><a href="https://github.com/Mike-Demo">GitHub</a> ·
+<a href="https://x.com/Mike_Demo">X</a> ·
+<a href="https://facebook.com/mikedemo42">Facebook</a> ·
+<a href="https://bsky.app/profile/mikedemo.bsky.social">Bluesky</a> ·
+<a href="https://github.com/Mike-Demo/gaming-multiverse-reasoner">Source</a> ·
+<a href="/llms.txt">llms.txt</a></p>
+<p>MIT licensed. Game data from IGDB (Twitch), snapshot frozen 14 Oct 2026.</p>
+</footer>
+</body></html>
+"""
+
+LLMS_TXT = """# Gaming Multiverse Reasoner
+
+> Pick any set of games and see the hidden paths, bridge games and communities
+> that connect them. Every path is computed live in FalkorDB from a frozen
+> IGDB snapshot; IBM watsonx (Granite) narrates the results, and every claim it
+> makes is validated in code against real path ids.
+
+Live app: https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud
+Source: https://github.com/Mike-Demo/gaming-multiverse-reasoner
+Licenses and full tech stack: https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/licenses
+
+## Data
+
+- 50,217 games from the IGDB API (Twitch), pulled and frozen 14 Oct 2026,
+  including the full QueerCade catalogue (753 games).
+- Graph "multiverse" in FalkorDB: 84,296 nodes / 1,023,292 relationships.
+  Node labels: Game, Company, Genre, Theme, GameMode, Platform,
+  PlayerPerspective, Franchise, Collection, Engine.
+- Snapshot frozen in IBM Cloud Object Storage as
+  snapshot/igdb-raw-2026-10-14-v2.tar.gz with snapshot/manifest-v2.json.
+- Communities are PRECOMPUTED (weighted label propagation over similar-game
+  links, 6,234 communities) and labelled as such wherever they appear.
+
+## Method (honesty rules)
+
+- Paths are computed live at request time with Cypher; each path response
+  includes the Cypher used.
+- Hub suppression: Platform and GameMode nodes never appear in paths; Genre,
+  Theme and Engine nodes shared by more than 12,000 games are suppressed;
+  company bridges cap company degree at 800.
+- Path kinds: lineage (remake/remaster/DLC/expansion/version/part-of),
+  company-bridge, similar-chain (shortest path over SIMILAR_TO),
+  common-neighbor, shared (shared attribute neighbour).
+- Narration claims must cite path_ids from the computed result; claims are
+  validated in code and dropped if they cite anything else. If watsonx is
+  unavailable, template claims are served and labelled source: "template".
+
+## REST API (JSON, no auth, read-only)
+
+- GET /api/health — graph name, game count, connected user.
+- GET /api/resolve?q=<title fragment> — matching games (igdb_id, name, year,
+  rating_count).
+- GET /api/bridges?ids=<id,id[,id[,id]]> — 2 to 4 IGDB ids; returns per-pair
+  paths with path_id, kind, templated description and the Cypher used, plus
+  per-game community info and stats.took_ms.
+- GET /api/random — 4 random games, validated so every pair connects.
+- POST /api/narrate — body: a /api/bridges response; returns claims citing
+  path_ids, with source "watsonx" or "template".
+- GET /openapi.json — OpenAPI 3 description of this API.
+- Errors are JSON: {"error": "..."} with an HTTP status code.
+
+## MCP server (for AI agents)
+
+- Endpoint: POST https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/mcp
+- Transport: Model Context Protocol over streamable HTTP, JSON responses.
+  JSON-RPC 2.0. Send initialize, then tools/list / tools/call.
+- Tools:
+  - resolve_game {query: string} — find games by title fragment.
+  - find_paths {games: [name-or-id, ...]} — 2-4 games by name or IGDB id;
+    names are resolved to their top match; returns the full paths payload.
+  - random_games {} — a validated random set of 4 connected games.
+  - game_community {igdb_id: number} — one game's community, peers, summary.
+  - narrate {ids: [number, ...]} — paths plus watsonx narration claims.
+- GET /mcp returns server info as JSON. GET /.well-known/agent.json is an
+  A2A-style agent card describing the same capabilities.
+
+## Limits
+
+- Read-only demo: no authentication, no writes, no state changes.
+- Graph queries are capped by a 5,000 ms FalkorDB timeout; the demo
+  four-game query typically answers in under 2 seconds.
+- Please be gentle: this is a hackathon demo on shared infrastructure.
+"""
+
+ROBOTS_TXT = """User-agent: *
+Allow: /
+
+Sitemap: https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/sitemap.xml
+"""
+
+SITEMAP_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/</loc></url>
+  <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/licenses</loc></url>
+  <url><loc>https://multiverse.2fy1rnikhcll.us-south.codeengine.appdomain.cloud/llms.txt</loc></url>
+</urlset>
+"""
+
+AGENT_CARD = {
+    "name": "Gaming Multiverse Reasoner",
+    "description": ("Finds hidden paths, bridge games and communities between "
+                    "any set of games, computed live in FalkorDB over a "
+                    "frozen snapshot of 50,217 IGDB games. The agent "
+                    "interface is the MCP server at POST /mcp (see "
+                    "documentationUrl); this card is descriptive."),
+    "url": PUBLIC_URL + "/",
+    "version": "1.0.0",
+    "provider": {"organization": "Mike Demopoulos",
+                 "url": "https://mikedemo.dev"},
+    "documentationUrl": PUBLIC_URL + "/llms.txt",
+    "capabilities": {"streaming": False, "pushNotifications": False},
+    "defaultInputModes": ["application/json", "text/plain"],
+    "defaultOutputModes": ["application/json"],
+    "skills": [
+        {"id": "find-paths", "name": "Find hidden paths between games",
+         "description": "MCP tool find_paths: 2-4 game names or IGDB ids -> per-pair paths with Cypher.",
+         "tags": ["games", "graph", "falkordb", "cypher"],
+         "examples": ["What connects Elden Ring and Hades?"]},
+        {"id": "resolve-game", "name": "Resolve a game title",
+         "description": "MCP tool resolve_game / GET /api/resolve: title fragment -> IGDB ids.",
+         "tags": ["games", "search", "igdb"],
+         "examples": ["Find games matching 'zelda'"]},
+        {"id": "random-games", "name": "Random connected games",
+         "description": "MCP tool random_games / GET /api/random: 4 random games whose pairs all connect.",
+         "tags": ["games", "random"],
+         "examples": ["Give me a surprise set of games"]},
+    ],
+}
+
+OPENAPI = {
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Gaming Multiverse Reasoner API",
+        "version": "1.0.0",
+        "description": ("Read-only JSON API over a FalkorDB graph of 50,217 "
+                        "IGDB games (frozen 14 Oct 2026). No authentication. "
+                        "Graph queries are capped by a 5,000 ms timeout; "
+                        "please be gentle — hackathon demo infrastructure. "
+                        "An MCP server with the same capabilities lives at "
+                        "POST /mcp; see /llms.txt."),
+    },
+    "servers": [{"url": PUBLIC_URL}],
+    "paths": {
+        "/api/health": {"get": {"summary": "Graph status",
+            "responses": {"200": {"description": "ok, graph, games, connected_as"}}}},
+        "/api/resolve": {"get": {"summary": "Find games by title fragment",
+            "parameters": [{"name": "q", "in": "query", "required": True,
+                            "schema": {"type": "string"}}],
+            "responses": {"200": {"description": "{results: [{igdb_id, name, year, rating_count}]}"}}}},
+        "/api/bridges": {"get": {"summary": "Hidden paths between 2-4 games",
+            "parameters": [{"name": "ids", "in": "query", "required": True,
+                            "schema": {"type": "string"},
+                            "description": "Comma-separated IGDB ids"}],
+            "responses": {"200": {"description": "{games, pairs: [{a, b, paths: [{path_id, kind, description, cypher}]}], stats: {took_ms}}"}}}},
+        "/api/random": {"get": {"summary": "Four random games whose pairs all connect",
+            "responses": {"200": {"description": "{games: [{igdb_id, name, rating_count}]}"}}}},
+        "/api/narrate": {"post": {"summary": "watsonx narration over a bridges result",
+            "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
+            "responses": {"200": {"description": "{source, model?, claims: [{text, path_ids}], note?}"}}}},
+        "/mcp": {"post": {"summary": "MCP server (streamable HTTP, JSON-RPC 2.0)",
+            "responses": {"200": {"description": "JSON-RPC response"}}},
+                 "get": {"summary": "MCP server info",
+            "responses": {"200": {"description": "{name, version, transport, tools}"}}}},
+    },
+}
+
+MCP_TOOLS = [
+    {"name": "resolve_game",
+     "description": "Find games in the 50,217-game IGDB snapshot by title fragment. Returns matches with IGDB ids.",
+     "inputSchema": {"type": "object",
+                     "properties": {"query": {"type": "string",
+                                               "description": "Title fragment, e.g. 'zelda'"}},
+                     "required": ["query"]}},
+    {"name": "find_paths",
+     "description": ("Find the hidden paths connecting 2-4 games: direct lineage "
+                     "(remakes, DLC, expansions), company bridges, similar-game "
+                     "chains, common neighbours and shared attributes. Games may "
+                     "be names (resolved to their top match) or IGDB ids. Every "
+                     "path includes the Cypher that computed it."),
+     "inputSchema": {"type": "object",
+                     "properties": {"games": {"type": "array", "minItems": 2,
+                                               "maxItems": 4,
+                                               "items": {"type": ["string", "number"]},
+                                               "description": "Game names or IGDB ids"}},
+                     "required": ["games"]}},
+    {"name": "random_games",
+     "description": "Draw 4 random games, validated so every pair connects in the graph.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "game_community",
+     "description": "One game's precomputed community (weighted label propagation): size, closest peers, year, rating and summary.",
+     "inputSchema": {"type": "object",
+                     "properties": {"igdb_id": {"type": "number",
+                                                 "description": "IGDB game id"}},
+                     "required": ["igdb_id"]}},
+    {"name": "narrate",
+     "description": ("Compute paths for 2-4 IGDB ids and narrate them with IBM "
+                     "watsonx. Claims cite path_ids and are validated in code; "
+                     "falls back to labelled template claims if watsonx is down."),
+     "inputSchema": {"type": "object",
+                     "properties": {"ids": {"type": "array", "minItems": 2,
+                                              "maxItems": 4,
+                                              "items": {"type": "number"}}},
+                     "required": ["ids"]}},
+]
+
+
+def mcp_tool_call(name, args):
+    args = args or {}
+    if name == "resolve_game":
+        return api_resolve(str(args.get("query", "")))
+    if name == "random_games":
+        return api_random()
+    if name == "game_community":
+        return game_info(int(args["igdb_id"]))
+    if name == "find_paths":
+        ids, resolved = [], []
+        for g in args.get("games", []):
+            if isinstance(g, (int, float)) or (isinstance(g, str) and g.isdigit()):
+                ids.append(int(g))
+            else:
+                hits = api_resolve(str(g)).get("results", [])
+                if hits:
+                    ids.append(hits[0]["igdb_id"])
+                    resolved.append({"query": g, "matched": hits[0]["name"],
+                                     "igdb_id": hits[0]["igdb_id"]})
+        ids = list(dict.fromkeys(ids))[:4]
+        if len(ids) < 2:
+            return {"error": "provide 2-4 games (names or IGDB ids); fewer than 2 resolved"}
+        out = api_bridges(ids)
+        if resolved:
+            out["resolved_names"] = resolved
+        return out
+    if name == "narrate":
+        ids = [int(x) for x in (args.get("ids") or [])][:4]
+        if len(ids) < 2:
+            return {"error": "provide 2-4 IGDB ids"}
+        return api_narrate(api_bridges(ids))
+    return {"error": f"unknown tool: {name}"}
+
+
+def mcp_handle(msg):
+    """One JSON-RPC message -> response dict, or None for notifications."""
+    if not isinstance(msg, dict):
+        return None
+    method, mid = msg.get("method"), msg.get("id")
+    if mid is None:
+        return None
+
+    def ok(result):
+        return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+    def err(code, message):
+        return {"jsonrpc": "2.0", "id": mid,
+                "error": {"code": code, "message": message}}
+
+    if method == "initialize":
+        pv = (msg.get("params") or {}).get("protocolVersion") or "2025-03-26"
+        return ok({"protocolVersion": pv,
+                   "capabilities": {"tools": {}},
+                   "serverInfo": {"name": "gaming-multiverse-reasoner",
+                                  "version": "1.0.0"}})
+    if method == "ping":
+        return ok({})
+    if method == "tools/list":
+        return ok({"tools": MCP_TOOLS})
+    if method == "tools/call":
+        p = msg.get("params") or {}
+        try:
+            result = mcp_tool_call(p.get("name"), p.get("arguments"))
+            is_err = isinstance(result, dict) and "error" in result
+            return ok({"content": [{"type": "text",
+                                    "text": json.dumps(result)}],
+                       "isError": is_err})
+        except Exception as e:
+            return ok({"content": [{"type": "text",
+                                    "text": f"{type(e).__name__}: {e}"}],
+                       "isError": True})
+    return err(-32601, f"method not found: {method}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
