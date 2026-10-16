@@ -56,6 +56,56 @@ Data: IGDB, frozen 14 Oct 2026 — every game with a rating count (IGDB's entire
 
 One node per company whether it developed or published — splitting those roles would split its paths too. Keywords were deliberately never pulled: they are hub poison.
 
+## Key Cypher
+
+Every answer is one of these traversals, run live via `GRAPH.RO_QUERY` as the read-only `app_reader` user, with a 5,000 ms graph timeout. Hot paths use anchored single-hop expansions intersected in code — measured much faster on this FalkorDB build than one large multi-type pattern. The same queries appear in `app.py` and under every path card in the UI.
+
+**Similar-game chain** — shortest path over the similarity graph:
+
+```cypher
+MATCH (a:Game {igdb_id:$a}), (b:Game {igdb_id:$b})
+WITH shortestPath((a)-[:SIMILAR_TO*..4]-(b)) AS p
+UNWIND nodes(p) AS n RETURN n.igdb_id, n.name
+```
+
+**Direct lineage** — remake / remaster / DLC / expansion / version / part-of:
+
+```cypher
+MATCH (a:Game {igdb_id:$a})-[r:PART_OF|VERSION_OF|DLC_OF|EXPANSION_OF|REMAKE_OF|REMASTER_OF]-(b:Game {igdb_id:$b})
+RETURN type(r), startNode(r).igdb_id
+```
+
+**Shared lineage parent** — both games connect to one parent game:
+
+```cypher
+MATCH (a:Game {igdb_id:$a})-[r1:PART_OF|VERSION_OF|DLC_OF|EXPANSION_OF|REMAKE_OF|REMASTER_OF]-(p:Game)-[r2:PART_OF|VERSION_OF|DLC_OF|EXPANSION_OF|REMAKE_OF|REMASTER_OF]-(b:Game {igdb_id:$b})
+WHERE p.igdb_id <> $a AND p.igdb_id <> $b
+RETURN p.igdb_id, p.name, type(r1), startNode(r1).igdb_id, type(r2), startNode(r2).igdb_id LIMIT 3
+```
+
+**Company bridge** — two degree-capped expansions (company degree cap 800), intersected in code; the games under a shared company are the bridge:
+
+```cypher
+MATCH (g:Game {igdb_id:$g})-[r]->(c:Company)
+WHERE c.degree <= $cap
+RETURN c.igdb_id, c.name, c.degree, type(r)
+```
+
+```cypher
+MATCH (c:Company {igdb_id:$c})<-[r]-(m:Game)
+WHERE m.igdb_id <> $a AND m.igdb_id <> $b
+RETURN m.igdb_id, m.name, coalesce(m.rating_count, 0), type(r) LIMIT 999
+```
+
+**Shared threads & common neighbours** — the anchored neighbourhood expansion below runs for both games and the results are intersected in code. Genre, theme, and engine nodes above degree 12,000 are suppressed as hubs; platforms and game modes never appear in paths:
+
+```cypher
+MATCH (g:Game {igdb_id:$g})-[r]-(x)
+RETURN labels(x)[0], x.igdb_id, x.name, x.degree, coalesce(x.rating_count, 0), type(r) LIMIT 9999
+```
+
+Communities come from weighted label propagation over SIMILAR_TO (mutual links ×2, one-way ×1, community size capped at 1,500), computed offline by `communities.py` and labeled as precomputed in the UI.
+
 ## How the AI works (and how it can't lie to you)
 
 watsonx does one narrow job: **narrate**. It receives the paths FalkorDB returned and replies with claims as structured JSON, each claim citing the `path_id`s it describes. The app then validates every citation in code — a claim whose IDs are not in the returned path set is dropped, and you never see it. Clicking a surviving claim highlights its path. If watsonx is unavailable, the app falls back to template explanations generated from the same paths and labels them `template` — the badge always says which source you're reading.
