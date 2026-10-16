@@ -910,7 +910,8 @@ main{padding:10px 10px 22px;gap:10px}
 header{padding:16px 14px 2px}h1{font-size:22px}
 #left{min-width:0;flex:1 1 100%}#right{min-width:0;flex:1 1 100%;
 max-height:none;overflow:visible}
-svg{height:430px}button{padding:13px 16px}.panel{padding:13px}}
+svg{height:490px}button{padding:13px 16px}.panel{padding:13px}
+.nlabel{font-size:14px}#status{display:block;margin-top:8px}}
 .nlabel{fill:var(--txt);font-size:11px;text-anchor:middle;pointer-events:none}
 .pairtitle{font-weight:700;margin:10px 0 6px}
 .path{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:7px 0;
@@ -1169,10 +1170,16 @@ document.getElementById('rand').onclick=async()=>{
 // --- tiny force layout + SVG render ---
 function renderGraph(){
   const svg=document.getElementById('graph');svg.innerHTML='';
+  // Portrait layout space on narrow screens: the landscape 900x560 space
+  // letterboxes into a tall phone viewport and shrinks labels to ~5px.
+  const portrait=window.matchMedia('(max-width:720px)').matches;
+  const W=portrait?540:900,H=portrait?740:560,CX=W/2,CY=H/2;
+  const MX=portrait?66:70,MY=portrait?40:45;
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
   const nodes=new Map(),edges=[];
   DATA.pairs.forEach(pr=>pr.paths.forEach(p=>{
     p.nodes.forEach(n=>{if(!nodes.has(n.key))nodes.set(n.key,
-      {...n,x:450+(Math.random()-.5)*500,y:280+(Math.random()-.5)*340,vx:0,vy:0})});
+      {...n,x:CX+(Math.random()-.5)*(W*.55),y:CY+(Math.random()-.5)*(H*.6),vx:0,vy:0})});
     p.edges.forEach(e=>edges.push({...e,pid:p.path_id}))}));
   const sel=new Set(DATA.games.map(g=>'Game:'+g.igdb_id));
   const nodePids={};
@@ -1184,7 +1191,7 @@ function renderGraph(){
   // Deterministic ellipse start + capped forces: uncapped repulsion in the
   // first version flung every node into the corners and pinned them there.
   arr.forEach((n,i)=>{const a=2*Math.PI*i/Math.max(arr.length,1);
-    n.x=450+210*Math.cos(a);n.y=280+150*Math.sin(a);n.vx=0;n.vy=0});
+    n.x=CX+(portrait?150:210)*Math.cos(a);n.y=CY+(portrait?290:150)*Math.sin(a);n.vx=0;n.vy=0});
   for(let t=0;t<300;t++){
     for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){
       const a=arr[i],b=arr[j];let dx=a.x-b.x,dy=a.y-b.y;
@@ -1196,11 +1203,11 @@ function renderGraph(){
       let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+0.01;
       let f=(d-135)*0.018,ux=dx/d,uy=dy/d;
       a.vx+=ux*f;a.vy+=uy*f;b.vx-=ux*f;b.vy-=uy*f});
-    arr.forEach(n=>{n.vx+=(450-n.x)*0.006;n.vy+=(280-n.y)*0.006;
+    arr.forEach(n=>{n.vx+=(CX-n.x)*0.006;n.vy+=(CY-n.y)*0.006;
       const sp=Math.hypot(n.vx,n.vy);
       if(sp>6){n.vx*=6/sp;n.vy*=6/sp}
       n.x+=n.vx;n.y+=n.vy;n.vx*=0.78;n.vy*=0.78;
-      n.x=Math.max(70,Math.min(830,n.x));n.y=Math.max(45,Math.min(515,n.y))});
+      n.x=Math.max(MX,Math.min(W-MX,n.x));n.y=Math.max(MY,Math.min(H-MY,n.y))});
   }
   const NS='http://www.w3.org/2000/svg';
   edges.forEach(e=>{
@@ -1236,7 +1243,7 @@ function renderGraph(){
     t.textContent=n.name.length>22?n.name.slice(0,21)+'…':n.name;
     const hit=document.createElementNS(NS,'circle');
     hit.setAttribute('cx',n.x);hit.setAttribute('cy',n.y);
-    hit.setAttribute('r',Math.max(r+7,20));hit.setAttribute('class','hit');
+    hit.setAttribute('r',Math.max(r+7,portrait?26:20));hit.setAttribute('class','hit');
     gEl.appendChild(c);gEl.appendChild(t);gEl.appendChild(hit);
     gEl.onclick=()=>{const pids=nodePids[n.key]||[];
       if(pids.length)setActive(pids,null)};
