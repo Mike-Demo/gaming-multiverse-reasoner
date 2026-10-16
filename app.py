@@ -911,7 +911,10 @@ header{padding:16px 14px 2px}h1{font-size:22px}
 #left{min-width:0;flex:1 1 100%}#right{min-width:0;flex:1 1 100%;
 max-height:none;overflow:visible}
 svg{height:490px}button{padding:13px 16px}.panel{padding:13px}
-.nlabel{font-size:14px}#status{display:block;margin-top:8px}}
+.nlabel{font-size:14px}#status{display:block;margin-top:8px}
+#go,#rand{width:100%;display:block}#rand{margin-top:10px}
+.share .small{flex:1 1 100%}
+.share .shbtn{flex:1 1 40%;justify-content:center;text-align:center}}
 .nlabel{fill:var(--txt);font-size:11px;text-anchor:middle;pointer-events:none}
 .pairtitle{font-weight:700;margin:10px 0 6px}
 .path{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:7px 0;
