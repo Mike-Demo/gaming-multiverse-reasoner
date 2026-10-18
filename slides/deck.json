@@ -1,0 +1,250 @@
+{
+  "boltSlidesVersion": 1,
+  "boltSlidesId": "11011050-f9d6-4d43-8a9e-3e43af51bbaf",
+  "deck": {
+    "title": "Gaming Multiverse Reasoner",
+    "transition": "fade",
+    "font": "space",
+    "accent": "#ff3d9a"
+  },
+  "slides": [
+    {
+      "id": "s1",
+      "position": 0,
+      "layout": "cover",
+      "props": {
+        "kicker": "WeMakeDevs × FalkorDB · Graph Hacks 2026",
+        "title": "Gaming ==Multiverse== Reasoner",
+        "subtitle": "Every game is connected. The graph proves it.",
+        "foot": "github.com/Mike-Demo/gaming-multiverse-reasoner"
+      },
+      "background": {
+        "type": "gradient",
+        "from": "#14051a",
+        "to": "#06080d",
+        "angle": 160
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Open with the hook: gaming feels like separate universes, but the data says otherwise. This project maps those connections at scale.",
+      "status": "none"
+    },
+    {
+      "id": "s2",
+      "position": 1,
+      "layout": "statGrid",
+      "props": {
+        "kicker": "The idea",
+        "title": "One giant knowledge graph of gaming.",
+        "stats": [
+          {
+            "value": "50,217",
+            "label": "real games",
+            "caption": "loaded from IGDB"
+          },
+          {
+            "value": "84,296",
+            "label": "graph nodes",
+            "caption": "developers, engines, themes, people"
+          },
+          {
+            "value": "1M+",
+            "label": "edges",
+            "caption": "shared studios, genres, franchises"
+          }
+        ]
+      },
+      "background": { "type": "color", "color": "var(--bg)" },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Anchor the scale: this is not a toy dataset. Half a corpus of real IGDB games becomes one queryable graph.",
+      "status": "none"
+    },
+    {
+      "id": "s3",
+      "position": 2,
+      "layout": "pillars",
+      "props": {
+        "title": "Three questions the graph answers.",
+        "items": [
+          {
+            "title": "Hidden paths",
+            "body": "Find the shortest chain of connections between any two games — no matter how unrelated they seem."
+          },
+          {
+            "title": "Bridge games",
+            "body": "Spot the titles that connect two otherwise separate communities of players."
+          },
+          {
+            "title": "Natural clusters",
+            "body": "Let the graph surface its own genres and communities, without anyone labeling them first."
+          }
+        ]
+      },
+      "background": { "type": "color", "color": "var(--bg)" },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Walk through the three query types briefly — path, bridge, cluster — and promise a live example in two slides.",
+      "status": "none"
+    },
+    {
+      "id": "s4",
+      "position": 3,
+      "layout": "steps",
+      "props": {
+        "kicker": "Under the hood",
+        "title": "How it works.",
+        "items": [
+          {
+            "title": "FalkorDB graph",
+            "body": "84,296 nodes and 1M+ edges on an IBM Cloud VPC virtual server."
+          },
+          {
+            "title": "App on Code Engine",
+            "body": "The explorer itself runs on IBM Cloud Code Engine."
+          },
+          {
+            "title": "watsonx.ai reasoning",
+            "body": "IBM Granite models turn plain questions into graph queries."
+          },
+          {
+            "title": "MCP server",
+            "body": "A hosted MCP endpoint so AI agents can query the graph too."
+          }
+        ]
+      },
+      "background": { "type": "color", "color": "var(--bg)" },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Emphasize the all-IBM deployment story plus FalkorDB as the graph engine, and that MCP makes it agent-accessible, not just human-accessible.",
+      "status": "none"
+    },
+    {
+      "id": "s5",
+      "position": 4,
+      "layout": "chat",
+      "props": {
+        "kicker": "Live example",
+        "title": "From farm sim to Soulsborne.",
+        "name": "Reasoner",
+        "messages": [
+          {
+            "from": "user",
+            "text": "What connects Stardew Valley to Dark Souls?"
+          },
+          {
+            "from": "ai",
+            "text": "Shortest path found — 3 hops:\n\nStardew Valley — built on → MonoGame\nMonoGame — also powers → Celeste\nCeleste — shares a tag with → Dark Souls\n\nOne engine and one infamous keyword bridge two very different worlds."
+          }
+        ]
+      },
+      "background": { "type": "color", "color": "var(--bg)" },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Read the chain out loud, hop by hop. The punchline: a cozy farming game and a punishing action RPG are three steps apart.",
+      "status": "none"
+    },
+    {
+      "id": "s6",
+      "position": 5,
+      "layout": "bento",
+      "props": {
+        "kicker": "Key features",
+        "title": "Built to explore.",
+        "tiles": [
+          {
+            "k": "01",
+            "title": "Ask in plain English",
+            "body": "Natural-language questions; watsonx.ai writes the graph query."
+          },
+          {
+            "fig": "50,217",
+            "title": "Full IGDB corpus",
+            "body": "Developers, genres, engines, themes and people — all linked.",
+            "variant": "accent"
+          },
+          {
+            "k": "02",
+            "title": "Interactive graph view",
+            "body": "Traverse paths hop by hop and watch the network grow."
+          },
+          {
+            "k": "03",
+            "title": "Agent-ready",
+            "body": "Hosted MCP server lets any AI assistant query the multiverse."
+          },
+          {
+            "fig": "1M+",
+            "title": "Edges and counting",
+            "body": "Every shared attribute is another route through the multiverse."
+          }
+        ]
+      },
+      "background": { "type": "color", "color": "var(--bg)" },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Don't read every tile — call out plain-English querying and the MCP agent access as the differentiators.",
+      "status": "none"
+    },
+    {
+      "id": "s7",
+      "position": 6,
+      "layout": "timeline",
+      "props": {
+        "kicker": "Status",
+        "title": "Shipped for Graph Hacks.",
+        "items": [
+          {
+            "time": "Oct 2026",
+            "title": "Graph Hacks",
+            "body": "Built for the WeMakeDevs × FalkorDB hackathon."
+          },
+          {
+            "time": "Oct 16, 2026",
+            "title": "Submitted",
+            "body": "Project delivered ahead of the deadline."
+          },
+          {
+            "time": "Now",
+            "title": "Live",
+            "body": "Running in production on IBM Cloud Code Engine."
+          }
+        ]
+      },
+      "background": { "type": "color", "color": "var(--bg)" },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "This is real, working software — submitted on October 16, 2026, and live right now for anyone to try.",
+      "status": "none"
+    },
+    {
+      "id": "s8",
+      "position": 7,
+      "layout": "cover",
+      "props": {
+        "kicker": "Explore the multiverse",
+        "title": "Every game is ==connected==.",
+        "subtitle": "Star it, fork it, ask it anything.",
+        "foot": "github.com/Mike-Demo/gaming-multiverse-reasoner"
+      },
+      "background": {
+        "type": "gradient",
+        "from": "#14051a",
+        "to": "#06080d",
+        "angle": 160
+      },
+      "animation": "cascade",
+      "transition": "zoom",
+      "nav": null,
+      "notes": "Close with the repo link and an invitation: pick any two games and try to stump the reasoner.",
+      "status": "none"
+    }
+  ]
+}
